@@ -7,7 +7,7 @@
 
 static void processx__child_init(processx_handle_t *handle, int pipes[3][2],
 				 char *command, char **args, int error_fd,
-				 const char *stdout, const char *stderr,
+				 const char *mystdout, const char *mystderr,
 				 processx_options_t *options);
 
 static SEXP processx__make_handle(SEXP private, int cleanup);
@@ -56,7 +56,7 @@ void processx__write_int(int fd, int err) {
 
 static void processx__child_init(processx_handle_t* handle, int pipes[3][2],
 				 char *command, char **args, int error_fd,
-				 const char *stdout, const char *stderr,
+				 const char *mystdout, const char *mystderr,
 				 processx_options_t *options) {
 
   int fd0, fd1, fd2;
@@ -77,13 +77,13 @@ static void processx__child_init(processx_handle_t* handle, int pipes[3][2],
 
   /* stdout is going into file or a pipe */
 
-  if (!stdout) {
+  if (!mystdout) {
     fd1 = open("/dev/null", O_RDWR);
-  } else if (!strcmp(stdout, "|")) {
+  } else if (!strcmp(mystdout, "|")) {
     fd1 = pipes[1][1];
     close(pipes[1][0]);
   } else {
-    fd1 = open(stdout, O_CREAT | O_TRUNC| O_RDWR, 0644);
+    fd1 = open(mystdout, O_CREAT | O_TRUNC| O_RDWR, 0644);
   }
   if (fd1 == -1) { processx__write_int(error_fd, - errno); raise(SIGKILL); }
 
@@ -92,13 +92,13 @@ static void processx__child_init(processx_handle_t* handle, int pipes[3][2],
 
   /* stderr, to file or a pipe */
 
-  if (!stderr) {
+  if (!mystderr) {
     fd2 = open("/dev/null", O_RDWR);
-  } else if (!strcmp(stderr, "|")) {
+  } else if (!strcmp(mystderr, "|")) {
     fd2 = pipes[2][1];
     close(pipes[2][0]);
   } else {
-    fd2 = open(stderr, O_CREAT | O_TRUNC| O_RDWR, 0644);
+    fd2 = open(mystderr, O_CREAT | O_TRUNC| O_RDWR, 0644);
   }
   if (fd2 == -1) { processx__write_int(error_fd, - errno); raise(SIGKILL); }
 
@@ -225,15 +225,15 @@ skip:
   processx__cloexec_fcntl(pipe[1], 1);
 }
 
-SEXP processx_exec(SEXP command, SEXP args, SEXP stdout, SEXP stderr,
+SEXP processx_exec(SEXP command, SEXP args, SEXP mystdout, SEXP mystderr,
 		   SEXP windows_verbatim_args,
 		   SEXP windows_hide_window, SEXP private, SEXP cleanup) {
 
   char *ccommand = processx__tmp_string(command, 0);
   char **cargs = processx__tmp_character(args);
   int ccleanup = INTEGER(cleanup)[0];
-  const char *cstdout = isNull(stdout) ? 0 : CHAR(STRING_ELT(stdout, 0));
-  const char *cstderr = isNull(stderr) ? 0 : CHAR(STRING_ELT(stderr, 0));
+  const char *cstdout = isNull(mystdout) ? 0 : CHAR(STRING_ELT(mystdout, 0));
+  const char *cstderr = isNull(mystderr) ? 0 : CHAR(STRING_ELT(mystderr, 0));
   processx_options_t options = { 0 };
 
   pid_t pid;

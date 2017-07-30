@@ -1,4 +1,4 @@
-2670fbd6b3e9aeed0f7eed4e09748072 *DESCRIPTION
+629773a9fc85e2d89abf6a262ac216f2 *DESCRIPTION
 ddfa93fe5d0827d872d34b7eef574617 *LICENSE
 7eddca7002dd917dadcbcd99e8b47d5f *NAMESPACE
 c5177646768669f445ccc60461e80b88 *NEWS.md
@@ -27,7 +27,7 @@ c1a10c54be9026e39f694c725721aa52 *src/processx.h
 3367e59f605fcba744ca6274e5508289 *src/unix/interruptible-calls.c
 400d157cb8cd72856f0ee989a05dfb8e *src/unix/poll.c
 aa981ccab1954703447713ced6f2b682 *src/unix/processx-unix.h
-c16d232c27bf4ab34ce17d3d2afd91c4 *src/unix/processx.c
+667a4c6a69961beaa05d308d7ddcfc12 *src/unix/processx.c
 bf3a64b865c8395ea15d2d6a52bfedd9 *src/unix/sigchld.c
 34bdef2505e2a3b6f45f8c26c06696c5 *src/unix/utils.c
 23ec553c9335d786470387814519b61a *src/win/poll.c
