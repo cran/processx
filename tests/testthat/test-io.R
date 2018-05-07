@@ -1,19 +1,30 @@
 
 context("io")
 
-test_that("We can get the output", {
+test_that("Output and error are discarded by default", {
 
-  win  <- "dir /b /A"
-  unix <- "ls -A"
-
-  p <- process$new(
-    commandline = if (os_type() == "windows") win else unix,
-    stdout = "|", stderr = "|"
-  )
+  px <- get_tool("px")
+  p <- process$new(px, c("outln", "foobar"))
   on.exit(try_silently(p$kill(grace = 0)), add = TRUE)
 
-  out <- sort(p$read_all_output_lines())
-  expect_identical(sort(out), sort(dir(no..=TRUE, all.files=TRUE)))
+  expect_error(p$read_output_lines(n=1),  "not a pipe")
+  expect_error(p$read_all_output_lines(), "not a pipe")
+  expect_error(p$read_all_output(),       "not a pipe")
+  expect_error(p$read_error_lines(n=1),   "not a pipe")
+  expect_error(p$read_all_error_lines(),  "not a pipe")
+  expect_error(p$read_all_error(),        "not a pipe")
+})
+
+test_that("We can get the output", {
+
+  px <- get_tool("px")
+
+  p <- process$new(px, c("out", "foo\nbar\nfoobar\n"),
+                   stdout = "|", stderr = "|")
+  on.exit(try_silently(p$kill(grace = 0)), add = TRUE)
+
+  out <- p$read_all_output_lines()
+  expect_identical(out, c("foo", "bar", "foobar"))
 })
 
 test_that("We can get the error stream", {
@@ -86,76 +97,49 @@ test_that("Output and error to specific files", {
   expect_identical(readLines(tmperr), c("hello", "world"))
 })
 
-test_that("isIncomplete", {
+test_that("is_incomplete", {
 
-  cmd <- if (os_type() == "windows") "dir /b /A" else "ls -A"
+  px <- get_tool("px")
+  p <- process$new(px, c("out", "foo\nbar\nfoobar\n"), stdout = "|")
 
-  p <- process$new(commandline = cmd, stdout = "|")
-  con <- p$get_output_connection()
-
-  expect_true(isIncomplete(con))
+  expect_true(p$is_incomplete_output())
 
   p$read_output_lines(n = 1)
-  expect_true(isIncomplete(con))
+  expect_true(p$is_incomplete_output())
 
   p$read_all_output_lines()
-  expect_false(isIncomplete(con))
-
-  close(con)
-})
-
-test_that("can read after process was finalized, unix", {
-
-  skip_other_platforms("unix")
-
-  p <- process$new("ls", stdout = "|")
-  con <- p$get_output_connection()
-  rm(p) ; gc()
-
-  expect_equal(sort(readLines(con)), sort(dir()))
-})
-
-test_that("can read after process was finalized, windows", {
-
-  skip_other_platforms("windows")
-
-  p <- process$new(commandline = "dir /b /A", stdout = "|")
-  con <- p$get_output_connection()
-  p$wait()
-  rm(p) ; gc()
-
-  out <- character()
-  while (isIncomplete(con)) out <- c(out, readLines(con))
-
-  expect_equal(sort(out), sort(dir()))
+  expect_false(p$is_incomplete_output())
 })
 
 test_that("readChar on IO, unix", {
 
+  ## Need to skip, because of the different EOL character
   skip_other_platforms("unix")
 
-  p <- process$new("echo", "hello world!", stdout = "|")
-  con <- p$get_output_connection()
+  px <- get_tool("px")
+
+  p <- process$new(px, c("outln", "hello world!"), stdout = "|")
   p$wait()
 
   p$poll_io(-1)
-  expect_equal(readChar(con, 5), "hello")
-  expect_equal(readChar(con, 5), " worl")
-  expect_equal(readChar(con, 5), "d!\n")
+  expect_equal(p$read_output(5), "hello")
+  expect_equal(p$read_output(5), " worl")
+  expect_equal(p$read_output(5), "d!\n")
 })
 
 test_that("readChar on IO, windows", {
 
+  ## Need to skip, because of the different EOL character
   skip_other_platforms("windows")
 
-  p <- process$new(commandline = "echo hello world!", stdout = "|")
-  con <- p$get_output_connection()
+  px <- get_tool("px")
+  p <- process$new(px, c("outln", "hello world!"), stdout = "|")
   p$wait()
 
   p$poll_io(-1)
-  expect_equal(readChar(con, 5), "hello")
+  expect_equal(p$read_output(5), "hello")
   p$poll_io(-1)
-  expect_equal(readChar(con, 5), " worl")
+  expect_equal(p$read_output(5), " worl")
   p$poll_io(-1)
-  expect_equal(readChar(con, 5), "d!\r\n")
+  expect_equal(p$read_output(5), "d!\r\n")
 })

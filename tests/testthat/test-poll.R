@@ -2,8 +2,9 @@
 context("poll")
 
 test_that("polling for output available", {
-  cmd <- if (os_type() == "unix") "sleep 1; ls" else "ping -n 2 127.0.0.1 && dir /b"
-  p <- process$new(commandline = cmd, stdout = "|")
+
+  px <- get_tool("px")
+  p <- process$new(px, c("sleep", "1", "outln", "foobar"), stdout = "|")
 
   ## Timeout
   expect_equal(p$poll_io(0), c(output = "timeout", error = "nopipe"))
@@ -22,12 +23,9 @@ test_that("polling for output available", {
 })
 
 test_that("polling for stderr", {
-  cmd <- if (os_type() == "unix") {
-    "sleep 1; ls 1>&2"
-  } else {
-    "ping -n 2 127.0.0.1 && dir /b 1>&2"
-  }
-  p <- process$new(commandline = cmd, stderr = "|")
+
+  px <- get_tool("px")
+  p <- process$new(px, c("sleep", "1", "errln", "foobar"), stderr = "|")
 
   ## Timeout
   expect_equal(p$poll_io(0), c(output = "nopipe", error = "timeout"))
@@ -47,13 +45,9 @@ test_that("polling for stderr", {
 
 test_that("polling for both stdout and stderr", {
 
-  cmd <- if (os_type() == "unix") {
-    "sleep 1; ls 1>&2; ls"
-  } else {
-    "ping -n 2 127.0.0.1 && dir /b 1>&2 && dir /b"
-  }
-
-  p <- process$new(commandline = cmd, stdout = "|", stderr = "|")
+  px <- get_tool("px")
+  p <- process$new(px, c("sleep", "1", "errln", "foo", "outln", "bar"),
+                   stdout = "|", stderr = "|")
 
   ## Timeout
   expect_equal(p$poll_io(0), c(output = "timeout", error = "timeout"))
@@ -70,4 +64,20 @@ test_that("polling for both stdout and stderr", {
   close(p$get_output_connection())
   close(p$get_error_connection())
   expect_equal(p$poll_io(-1), c(output = "closed", error = "closed"))
+})
+
+test_that("multiple polls", {
+
+  px <- get_tool("px")
+  p <- process$new(
+    px, c("sleep", "1", "outln", "foo", "sleep", "1", "outln", "bar"),
+    stdout = "|", stderr = "|")
+
+  out <- character()
+  while (p$is_alive()) {
+    p$poll_io(2000)
+    out <- c(out, p$read_output_lines())
+  }
+
+  expect_identical(out, c("foo", "bar"))
 })

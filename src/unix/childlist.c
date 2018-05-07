@@ -1,5 +1,5 @@
 
-#include "processx-unix.h"
+#include "../processx.h"
 
 processx__child_list_t child_list_head = { 0, 0, 0 };
 processx__child_list_t *child_list = &child_list_head;
@@ -10,6 +10,9 @@ void processx__freelist_add(processx__child_list_t *ptr) {
   ptr->next = child_free_list->next;
   child_free_list->next = ptr;
 }
+
+/* This is not a race condition with the SIGCHLD handler, because this
+   function is only called with the handler blocked, from processx.c */
 
 void processx__freelist_free() {
   processx__child_list_t *ptr = child_free_list->next;
@@ -32,6 +35,7 @@ int processx__child_add(pid_t pid, SEXP status) {
 }
 
 /* This is actually not used currently. But it should work fine. */
+/* LCOV_EXCL_START */
 
 void processx__child_remove(pid_t pid) {
   processx__child_list_t *prev = child_list, *ptr = child_list->next;
@@ -62,6 +66,8 @@ processx__child_list_t *processx__child_find(pid_t pid) {
   return 0;
 }
 
+/* LCOV_EXCL_STOP */
+
 SEXP processx__killem_all() {
   processx__child_list_t *ptr = child_list->next;
   int killed = 0;
@@ -76,11 +82,11 @@ SEXP processx__killem_all() {
     int wp, wstat;
 
     if (handle && handle->cleanup) {
-      killed++;
-      kill(ptr->pid, SIGKILL);
+      int ret = kill(ptr->pid, SIGKILL);
       do {
 	wp = waitpid(ptr->pid, &wstat, 0);
       } while (wp == -1 && errno == EINTR);
+      if (ret == 0) killed++;
     }
 
     R_ClearExternalPtr(status);

@@ -2,34 +2,57 @@
 #ifndef PROCESSX_H
 #define PROCESSX_H
 
+#ifdef __cplusplus
+extern "C" {
+#endif
+
+#ifdef _WIN32
+#include <windows.h>
+#else
+#include <unistd.h>
+#include <stdlib.h>
+#include <errno.h>
+#include <fcntl.h>
+#include <string.h>
+#include <sys/socket.h>
+#include <signal.h>
+#include <sys/wait.h>
+#include <poll.h>
+#endif
+
 #include <Rinternals.h>
+#include "processx-connection.h"
+
+#ifdef _WIN32
+#include "win/processx-win.h"
+#else
+#include "unix/processx-unix.h"
+#endif
 
 /* API from R */
 
 SEXP processx_exec(SEXP command, SEXP args, SEXP std_out, SEXP std_err,
 		   SEXP windows_verbatim_args,
-		   SEXP windows_hide_window, SEXP private, SEXP cleanup);
+		   SEXP windows_hide_window, SEXP private_, SEXP cleanup,
+		   SEXP encoding);
 SEXP processx_wait(SEXP status, SEXP timeout);
 SEXP processx_is_alive(SEXP status);
 SEXP processx_get_exit_status(SEXP status);
 SEXP processx_signal(SEXP status, SEXP signal);
 SEXP processx_kill(SEXP status, SEXP grace);
 SEXP processx_get_pid(SEXP status);
-SEXP processx_poll_io(SEXP status, SEXP ms, SEXP stdout_pipe,
-		      SEXP stderr_pipe);
 
-SEXP processx_poll(SEXP statuses, SEXP ms, SEXP outputs, SEXP errors);
+SEXP processx_poll(SEXP statuses, SEXP ms);
 
 SEXP processx__process_exists(SEXP pid);
+SEXP processx__disconnect_process_handle(SEXP status);
+
+SEXP processx_is_named_pipe_open(SEXP pipe_ext);
+SEXP processx_close_named_pipe(SEXP pipe_ext);
+SEXP processx_create_named_pipe(SEXP name, SEXP mode);
+SEXP processx_write_named_pipe(SEXP pipe_ext, SEXP text);
 
 /* Common declarations */
-
-#include <Rinternals.h>
-
-#include <R_ext/Connections.h>
-#if ! defined(R_CONNECTIONS_VERSION) || R_CONNECTIONS_VERSION != 1
-#error "Unsupported connections API version"
-#endif
 
 /* Interruption interval in ms */
 #define PROCESSX_INTERRUPT_INTERVAL 200
@@ -56,5 +79,9 @@ typedef struct {
   int windows_verbatim_args;
   int windows_hide;
 } processx_options_t;
+
+#ifdef __cplusplus
+}
+#endif
 
 #endif

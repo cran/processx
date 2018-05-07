@@ -1,4 +1,3 @@
-
 #' Run external command, and wait until finishes
 #'
 #' `run` provides an interface similar to [base::system()] and
@@ -31,8 +30,6 @@
 #'   `system_command_status_error` and `system_command_timeout_error`,
 #'   respectively, and both errors have class `system_command_error` as
 #'   well.
-#' @param commandline A character scalar, a full command line.
-#'   No escaping will be performed on it.
 #' @param echo_cmd Whether to print the command to run to the screen.
 #' @param echo Whether to print the standard output and error
 #'   to the screen. Note that the order of the standard output and error
@@ -60,6 +57,10 @@
 #'   command and the arguments on windows. Ignored on other platforms.
 #' @param windows_hide_window Whether to hide the window of the
 #'   application on windows. Ignored on other platforms.
+#' @param encoding The encoding to assume for `stdout` and
+#'   `stderr`. By default the encoding of the current locale is
+#'   used. Note that `processx` always reencodes the output of
+#'   both streams in UTF-8 currently.
 #' @return A list with components:
 #'   * status The exit status of the process. If this is `NA`, then the
 #'     process was killed and had no exit status.
@@ -73,27 +74,28 @@
 #' \dontrun{
 #' if (.Platform$OS.type == "unix") {
 #'   run("ls")
-#'   system.time(run(commandline = "sleep 10", timeout = 1,
+#'   system.time(run("sleep", "10", timeout = 1,
 #'     error_on_status = FALSE))
 #'   system.time(
 #'     run(
-#'       commandline = "for i in 1 2 3 4 5; do echo $i; sleep 1; done",
-#'       timeout=2, error_on_status = FALSE
+#'       "sh", c("-c", "for i in 1 2 3 4 5; do echo $i; sleep 1; done"),
+#'       timeout = 2, error_on_status = FALSE
 #'     )
 #'   )
 #' } else {
-#'   run(commandline = "ping -n 1 127.0.0.1")
-#'   run(commandline = "ping -n 6 127.0.0.1", timeout = 1,
+#'   run("ping", c("-n", "1", "127.0.0.1"))
+#'   run("ping", c("-n", "6", "127.0.0.1"), timeout = 1,
 #'     error_on_status = FALSE)
 #' }
 #' }
 
 run <- function(
-  command = NULL, args = character(), commandline = NULL,
+  command = NULL, args = character(),
   error_on_status = TRUE, echo_cmd = FALSE, echo = FALSE, spinner = FALSE,
   timeout = Inf, stdout_line_callback = NULL, stdout_callback = NULL,
   stderr_line_callback = NULL, stderr_callback = NULL,
-  windows_verbatim_args = FALSE, windows_hide_window = FALSE) {
+  windows_verbatim_args = FALSE, windows_hide_window = FALSE,
+  encoding = "") {
 
   assert_that(is_flag(error_on_status))
   assert_that(is_time_interval(timeout))
@@ -105,16 +107,18 @@ run <- function(
   assert_that(is.null(stdout_callback) || is.function(stdout_callback))
   assert_that(is.null(stderr_callback) || is.function(stderr_callback))
   ## The rest is checked by process$new()
+  "!DEBUG run() Checked arguments"
 
   if (!interactive()) spinner <- FALSE
 
   ## Run the process
   pr <- process$new(
-    command, args, commandline, echo_cmd = echo_cmd,
+    command, args, echo_cmd = echo_cmd,
     windows_verbatim_args = windows_verbatim_args,
     windows_hide_window = windows_hide_window,
-    stdout = "|", stderr = "|"
+    stdout = "|", stderr = "|", encoding = encoding
   )
+  "#!DEBUG run() Started the process: `pr$get_pid()`"
 
   ## If echo, then we need to create our own callbacks.
   ## These are merged to user callbacks if there are any.
@@ -123,11 +127,24 @@ run <- function(
     stderr_callback <- echo_callback(stderr_callback, "stderr")
   }
 
-  res <- run_manage(pr, timeout, spinner, stdout_line_callback,
-                    stdout_callback, stderr_line_callback,
-                    stderr_callback)
+  ## Make the process interruptible, and kill it on interrupt
+  runcall <- sys.call()
+  res <- tryCatch(
+    run_manage(pr, timeout, spinner, stdout_line_callback,
+               stdout_callback, stderr_line_callback,
+               stderr_callback),
+    interrupt = function(e) {
+      tryCatch(pr$kill(), error = function(e) NULL)
+      "!DEBUG run() process `pr$get_pid()` killed on interrupt"
+      stop(make_condition(
+        list(interrupt = TRUE),
+        runcall
+      ))
+    }
+  )
 
   if (error_on_status && (is.na(res$status) || res$status != 0)) {
+    "!DEBUG run() error on status `res$status` for process `pr$get_pid()`"
     stop(make_condition(res, call = sys.call()))
   }
 
@@ -161,7 +178,7 @@ run_manage <- function(proc, timeout, spinner, stdout_line_callback,
 
   do_output <- function() {
 
-    newout <- readChar(proc$get_output_connection(), 2000)
+    newout <- proc$read_output(2000)
     if (length(newout) && nzchar(newout)) {
       if (!is.null(stdout_callback)) stdout_callback(newout, proc)
       stdout <<- paste0(stdout, newout)
@@ -177,7 +194,7 @@ run_manage <- function(proc, timeout, spinner, stdout_line_callback,
       }
     }
 
-    newerr <- readChar(proc$get_error_connection(), 2000)
+    newerr <- proc$read_error(2000)
     if (length(newerr) && nzchar(newerr)) {
       stderr <<- paste0(stderr, newerr)
       if (!is.null(stderr_callback)) stderr_callback(newerr, proc)
@@ -209,6 +226,7 @@ run_manage <- function(proc, timeout, spinner, stdout_line_callback,
     ## Timeout? Maybe finished by now...
     if (!is.null(timeout) && Sys.time() - start_time > timeout) {
       if (proc$kill()) timeout_happened <- TRUE
+      "!DEBUG Timeout killed run() process `proc$get_pid()`"
       break
     }
 
@@ -218,11 +236,12 @@ run_manage <- function(proc, timeout, spinner, stdout_line_callback,
     ## so interruption does not work.
     if (!is.null(timeout) && timeout < Inf) {
       remains <- timeout - (Sys.time() - start_time)
-      remains <- as.integer(as.numeric(remains) * 1000)
+      remains <- max(0, as.integer(as.numeric(remains) * 1000))
       if (spinner) remains <- min(remains, 200)
     } else {
       remains <- 200
     }
+    "!DEBUG run is polling for `remains` ms, process `proc$get_pid()`"
     polled <- proc$poll_io(remains)
 
     ## If output/error, then collect it
@@ -232,10 +251,13 @@ run_manage <- function(proc, timeout, spinner, stdout_line_callback,
   }
 
   ## Needed to get the exit status
+  "!DEBUG run() waiting to get exit status, process `proc$get_pid()`"
   proc$wait()
 
   ## We might still have output
+  "!DEBUG run() reading leftover output / error, process `proc$get_pid()`"
   while (proc$is_incomplete_output() || proc$is_incomplete_error()) {
+    proc$poll_io(-1)
     do_output()
   }
 
@@ -250,7 +272,18 @@ run_manage <- function(proc, timeout, spinner, stdout_line_callback,
 }
 
 make_condition <- function(result, call) {
-  if (result$timeout) {
+
+  if (isTRUE(result$interrupt)) {
+    structure(
+      list(
+        message = "System command interrupted",
+        stderr = NULL,
+        call = call
+      ),
+      class = c("system_command_interrupt", "condition")
+    )
+
+  } else if (isTRUE(result$timeout)) {
     structure(
       list(
         message = "System command timeout",

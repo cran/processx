@@ -46,10 +46,11 @@ connection was.
 \section{Known issues}{
 
 
-You cannot wait on the termination of a process directly. It is only
-signalled through the closed stdout and stderr pipes. This means that
-if both stdout and stderr are ignored or closed for a process, then you
-will not be notified when it exits.
+\code{poll()} cannot wait on the termination of a process directly. It is
+only signalled through the closed stdout and stderr pipes. This means
+that if both stdout and stderr are ignored or closed for a process,
+then you will not be notified when it exits. If you want to wait for
+just a single process to end, it can be done with the \code{$wait()} method.
 }
 
 \examples{
@@ -57,18 +58,18 @@ will not be notified when it exits.
 \dontrun{
 cmd1 <- switch(
   .Platform$OS.type,
-  "unix" = "sleep 1; ls",
-  "ping -n 2 127.0.0.1 && dir /b"
+  "unix" = c("sh", "-c", "sleep 1; ls"),
+  c("cmd", "/c", "ping -n 2 127.0.0.1 && dir /b")
 )
 cmd2 <- switch(
   .Platform$OS.type,
-  "unix" = "sleep 2; ls 1>&2",
-  "ping -n 2 127.0.0.1 && dir /b 1>&2"
+  "unix" = c("sh", "-c", "sleep 2; ls 1>&2"),
+  c("cmd", "/c", "ping -n 2 127.0.0.1 && dir /b 1>&2")
 )
 
 ## Run them. p1 writes to stdout, p2 to stderr, after some sleep
-p1 <- process$new(commandline = cmd1, stdout = "|")
-p2 <- process$new(commandline = cmd2, stderr = "|")
+p1 <- process$new(cmd1[1], cmd1[-1], stdout = "|")
+p2 <- process$new(cmd2[1], cmd2[-1], stderr = "|")
 
 ## Nothing to read initially
 poll(list(p1 = p1, p2 = p2), 0)

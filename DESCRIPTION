@@ -1,9 +1,9 @@
 Package: processx
 Title: Execute and Control System Processes
-Version: 2.0.0.1
-Author: Gábor Csárdi
+Version: 3.0.3
+Author: Gábor Csárdi, Winston Chang
 Maintainer: Gábor Csárdi <csardi.gabor@gmail.com>
-Description: Portable tools to run system processes in the background.
+Description: Tools to run system processes in the background.
     It can check if a background process is running; wait on a background
     process to finish; get the exit status of finished processes; kill
     background processes and their children; restart processes. It can read
@@ -12,13 +12,14 @@ Description: Portable tools to run system processes in the background.
     error, with a timeout. It can also poll several processes at once.
 License: MIT + file LICENSE
 LazyData: true
-URL: https://github.com/r-pkgs/processx#readme
-BugReports: https://github.com/r-pkgs/processx/issues
+URL: https://github.com/r-lib/processx#readme
+BugReports: https://github.com/r-lib/processx/issues
 RoxygenNote: 6.0.1.9000
-Suggests: covr, testthat, withr
 Imports: assertthat, crayon, debugme, R6, utils
+LinkingTo: testthat
+Suggests: covr, testthat, withr
 Encoding: UTF-8
 NeedsCompilation: yes
-Packaged: 2017-07-30 06:19:45 UTC; ripley
+Packaged: 2017-12-19 19:55:02 UTC; gaborcsardi
 Repository: CRAN
-Date/Publication: 2017-07-30 06:34:51 UTC
+Date/Publication: 2018-05-07 12:14:45 UTC

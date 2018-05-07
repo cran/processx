@@ -1,17 +1,19 @@
 
 #ifndef _WIN32
 
-#include "processx-unix.h"
+#include "../processx.h"
 
 /* Internals */
 
 static void processx__child_init(processx_handle_t *handle, int pipes[3][2],
 				 char *command, char **args, int error_fd,
-				 const char *mystdout, const char *mystderr,
+				 const char *std_out, const char *std_err,
 				 processx_options_t *options);
 
 static SEXP processx__make_handle(SEXP private, int cleanup);
 static void processx__handle_destroy(processx_handle_t *handle);
+void processx__create_connections(processx_handle_t *handle, SEXP private,
+				  const char *encoding);
 
 /* Define BSWAP_32 on Big Endian systems */
 #ifdef WORDS_BIGENDIAN
@@ -49,6 +51,9 @@ void R_init_processx_unix() {
   child_free_list = &child_free_list_head;
 }
 
+/* These run in the child process, so no coverage here. */
+/* LCOV_EXCL_START */
+
 void processx__write_int(int fd, int err) {
   int dummy = write(fd, &err, sizeof(int));
   (void) dummy;
@@ -56,11 +61,11 @@ void processx__write_int(int fd, int err) {
 
 static void processx__child_init(processx_handle_t* handle, int pipes[3][2],
 				 char *command, char **args, int error_fd,
-				 const char *mystdout, const char *mystderr,
+				 const char *std_out, const char *std_err,
 				 processx_options_t *options) {
 
   int fd0, fd1, fd2;
-  int max_fds, i;
+  int i;
 
   setsid();
 
@@ -77,13 +82,13 @@ static void processx__child_init(processx_handle_t* handle, int pipes[3][2],
 
   /* stdout is going into file or a pipe */
 
-  if (!mystdout) {
+  if (!std_out) {
     fd1 = open("/dev/null", O_RDWR);
-  } else if (!strcmp(mystdout, "|")) {
+  } else if (!strcmp(std_out, "|")) {
     fd1 = pipes[1][1];
     close(pipes[1][0]);
   } else {
-    fd1 = open(mystdout, O_CREAT | O_TRUNC| O_RDWR, 0644);
+    fd1 = open(std_out, O_CREAT | O_TRUNC| O_RDWR, 0644);
   }
   if (fd1 == -1) { processx__write_int(error_fd, - errno); raise(SIGKILL); }
 
@@ -92,13 +97,13 @@ static void processx__child_init(processx_handle_t* handle, int pipes[3][2],
 
   /* stderr, to file or a pipe */
 
-  if (!mystderr) {
+  if (!std_err) {
     fd2 = open("/dev/null", O_RDWR);
-  } else if (!strcmp(mystderr, "|")) {
+  } else if (!strcmp(std_err, "|")) {
     fd2 = pipes[2][1];
     close(pipes[2][0]);
   } else {
-    fd2 = open(mystderr, O_CREAT | O_TRUNC| O_RDWR, 0644);
+    fd2 = open(std_err, O_CREAT | O_TRUNC| O_RDWR, 0644);
   }
   if (fd2 == -1) { processx__write_int(error_fd, - errno); raise(SIGKILL); }
 
@@ -109,17 +114,23 @@ static void processx__child_init(processx_handle_t* handle, int pipes[3][2],
   processx__nonblock_fcntl(fd1, 0);
   processx__nonblock_fcntl(fd2, 0);
 
-  max_fds = sysconf(_SC_OPEN_MAX);
   for (i = 3; i < error_fd; i++) {
     close(i);
   }
   for (i = error_fd + 1; ; i++) {
-    if (-1 == close(i) && i > 15) break;
+    if (-1 == close(i) && i > 200) break;
   }
 
   execvp(command, args);
   processx__write_int(error_fd, - errno);
   raise(SIGKILL);
+}
+
+/* LCOV_EXCL_STOP */
+
+SEXP processx__disconnect_process_handle(SEXP status) {
+  R_SetExternalPtrTag(status, R_NilValue);
+  return R_NilValue;
 }
 
 void processx__finalizer(SEXP status) {
@@ -158,10 +169,19 @@ void processx__finalizer(SEXP status) {
   }
 
   /* Copy over pid and exit status */
-  private = R_ExternalPtrTag(status);
-  defineVar(install("exited"), ScalarLogical(1), private);
-  defineVar(install("pid"), ScalarInteger(pid), private);
-  defineVar(install("exitcode"), ScalarInteger(handle->exitcode), private);
+  private = PROTECT(R_ExternalPtrTag(status));
+  if (!isNull(private)) {
+    SEXP sone = PROTECT(ScalarLogical(1));
+    SEXP spid = PROTECT(ScalarInteger(pid));
+    SEXP sexitcode = PROTECT(ScalarInteger(handle->exitcode));
+
+    defineVar(install("exited"), sone, private);
+    defineVar(install("pid"), spid, private);
+    defineVar(install("exitcode"), sexitcode, private);
+    UNPROTECT(3);
+  }
+
+  UNPROTECT(1);
 
   /* Note: if no cleanup is requested, then we still have a sigchld
      handler, to read out the exit code via waitpid, but no handle
@@ -209,7 +229,7 @@ void processx__make_socketpair(int pipe[2]) {
    * Anything else is a genuine error.
    */
   if (errno != EINVAL) {
-    error("processx socketpair: %s", strerror(errno));
+    error("processx socketpair: %s", strerror(errno)); /* LCOV_EXCL_LINE */
   }
 
   no_cloexec = 1;
@@ -225,15 +245,17 @@ skip:
   processx__cloexec_fcntl(pipe[1], 1);
 }
 
-SEXP processx_exec(SEXP command, SEXP args, SEXP mystdout, SEXP mystderr,
+SEXP processx_exec(SEXP command, SEXP args, SEXP std_out, SEXP std_err,
 		   SEXP windows_verbatim_args,
-		   SEXP windows_hide_window, SEXP private, SEXP cleanup) {
+		   SEXP windows_hide_window, SEXP private, SEXP cleanup,
+		   SEXP encoding) {
 
   char *ccommand = processx__tmp_string(command, 0);
   char **cargs = processx__tmp_character(args);
   int ccleanup = INTEGER(cleanup)[0];
-  const char *cstdout = isNull(mystdout) ? 0 : CHAR(STRING_ELT(mystdout, 0));
-  const char *cstderr = isNull(mystderr) ? 0 : CHAR(STRING_ELT(mystderr, 0));
+  const char *cstdout = isNull(std_out) ? 0 : CHAR(STRING_ELT(std_out, 0));
+  const char *cstderr = isNull(std_err) ? 0 : CHAR(STRING_ELT(std_err, 0));
+  const char *cencoding = CHAR(STRING_ELT(encoding, 0));
   processx_options_t options = { 0 };
 
   pid_t pid;
@@ -262,26 +284,29 @@ SEXP processx_exec(SEXP command, SEXP args, SEXP mystdout, SEXP mystderr,
 
   pid = fork();
 
+  /* TODO: how could we test a failure? */
   if (pid == -1) {		/* ERROR */
     err = -errno;
-    close(signal_pipe[0]);
-    close(signal_pipe[1]);
+    if (signal_pipe[0] >= 0) close(signal_pipe[0]);
+    if (signal_pipe[1] >= 0) close(signal_pipe[1]);
     processx__unblock_sigchld();
     goto cleanup;
   }
 
   /* CHILD */
   if (pid == 0) {
+    /* LCOV_EXCL_START */
     processx__child_init(handle, pipes, ccommand, cargs, signal_pipe[1],
 			 cstdout, cstderr, &options);
     goto cleanup;
+    /* LCOV_EXCL_STOP */
   }
 
   /* We need to know the processx children */
   if (processx__child_add(pid, result)) {
     err = -errno;
-    close(signal_pipe[0]);
-    close(signal_pipe[1]);
+    if (signal_pipe[0] >= 0) close(signal_pipe[0]);
+    if (signal_pipe[1] >= 0) close(signal_pipe[1]);
     processx__unblock_sigchld();
     goto cleanup;
   }
@@ -289,7 +314,7 @@ SEXP processx_exec(SEXP command, SEXP args, SEXP mystdout, SEXP mystderr,
   /* SIGCHLD can arrive now */
   processx__unblock_sigchld();
 
-  close(signal_pipe[1]);
+  if (signal_pipe[1] >= 0) close(signal_pipe[1]);
 
   do {
     r = read(signal_pipe[0], &exec_errorno, sizeof(exec_errorno));
@@ -311,7 +336,7 @@ SEXP processx_exec(SEXP command, SEXP args, SEXP mystdout, SEXP mystderr,
     goto cleanup;
   }
 
-  close(signal_pipe[0]);
+  if (signal_pipe[0] >= 0) close(signal_pipe[0]);
 
   /* Set fds for standard I/O */
   /* TODO: implement stdin */
@@ -330,7 +355,7 @@ SEXP processx_exec(SEXP command, SEXP args, SEXP mystdout, SEXP mystderr,
   if (pipes[2][1] >= 0) close(pipes[2][1]);
 
   /* Create proper connections */
-  processx__create_connections(handle, private);
+  processx__create_connections(handle, private, cencoding);
 
   if (exec_errorno == 0) {
     handle->pid = pid;
@@ -394,6 +419,7 @@ SEXP processx_wait(SEXP status, SEXP timeout) {
   int ctimeout = INTEGER(timeout)[0], timeleft = ctimeout;
   struct pollfd fd;
   int ret = 0;
+  pid_t pid;
 
   processx__block_sigchld();
 
@@ -401,6 +427,8 @@ SEXP processx_wait(SEXP status, SEXP timeout) {
     processx__unblock_sigchld();
     error("Internal processx error, handle already removed");
   }
+
+  pid = handle->pid;
 
   /* If we already have the status, then return now. */
   if (handle->collected) {
@@ -436,6 +464,12 @@ SEXP processx_wait(SEXP status, SEXP timeout) {
     if (ret != 0) break;
 
     R_CheckUserInterrupt();
+
+    /* We also check if the process is alive, because the SIGCHLD is
+       not delivered in valgrind :( */
+    ret = kill(pid, 0);
+    if (ret != 0) return ScalarLogical(1);
+
     if (ctimeout >= 0) timeleft -= PROCESSX_INTERRUPT_INTERVAL;
   }
 
@@ -450,8 +484,8 @@ SEXP processx_wait(SEXP status, SEXP timeout) {
     error("processx wait with timeout error: %s", strerror(errno));
   }
 
-  close(handle->waitpipe[0]);
-  close(handle->waitpipe[1]);
+  if (handle->waitpipe[0] >= 0) close(handle->waitpipe[0]);
+  if (handle->waitpipe[1] >= 0) close(handle->waitpipe[1]);
   handle->waitpipe[0] = -1;
 
   return ScalarLogical(ret != 0);
@@ -561,7 +595,7 @@ SEXP processx_get_exit_status(SEXP status) {
 }
 
 /* See `processx_wait` above for the description of async processes and
- * possible rae conditions.
+ * possible race conditions.
  *
  * This is mostly along the lines of `processx_is_alive`. After we
  * successfully sent the signal, we try a `waitpid` just in case the

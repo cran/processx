@@ -4,12 +4,12 @@
 \alias{run}
 \title{Run external command, and wait until finishes}
 \usage{
-run(command = NULL, args = character(), commandline = NULL,
-  error_on_status = TRUE, echo_cmd = FALSE, echo = FALSE,
-  spinner = FALSE, timeout = Inf, stdout_line_callback = NULL,
-  stdout_callback = NULL, stderr_line_callback = NULL,
-  stderr_callback = NULL, windows_verbatim_args = FALSE,
-  windows_hide_window = FALSE)
+run(command = NULL, args = character(), error_on_status = TRUE,
+  echo_cmd = FALSE, echo = FALSE, spinner = FALSE, timeout = Inf,
+  stdout_line_callback = NULL, stdout_callback = NULL,
+  stderr_line_callback = NULL, stderr_callback = NULL,
+  windows_verbatim_args = FALSE, windows_hide_window = FALSE,
+  encoding = "")
 }
 \arguments{
 \item{command}{Character scalar, the command to run. It will be
@@ -17,9 +17,6 @@ escaped via \link[base:shQuote]{base::shQuote}.}
 
 \item{args}{Character vector, arguments to the command. They will be
 escaped via \link[base:shQuote]{base::shQuote}.}
-
-\item{commandline}{A character scalar, a full command line.
-No escaping will be performed on it.}
 
 \item{error_on_status}{Whether to throw an error if the command returns
 with a non-zero status, or it is interrupted. The error clases are
@@ -63,6 +60,11 @@ command and the arguments on windows. Ignored on other platforms.}
 
 \item{windows_hide_window}{Whether to hide the window of the
 application on windows. Ignored on other platforms.}
+
+\item{encoding}{The encoding to assume for \code{stdout} and
+\code{stderr}. By default the encoding of the current locale is
+used. Note that \code{processx} always reencodes the output of
+both streams in UTF-8 currently.}
 }
 \value{
 A list with components:
@@ -106,17 +108,17 @@ standard output or error.
 \dontrun{
 if (.Platform$OS.type == "unix") {
   run("ls")
-  system.time(run(commandline = "sleep 10", timeout = 1,
+  system.time(run("sleep", "10", timeout = 1,
     error_on_status = FALSE))
   system.time(
     run(
-      commandline = "for i in 1 2 3 4 5; do echo $i; sleep 1; done",
-      timeout=2, error_on_status = FALSE
+      "sh", c("-c", "for i in 1 2 3 4 5; do echo $i; sleep 1; done"),
+      timeout = 2, error_on_status = FALSE
     )
   )
 } else {
-  run(commandline = "ping -n 1 127.0.0.1")
-  run(commandline = "ping -n 6 127.0.0.1", timeout = 1,
+  run("ping", c("-n", "1", "127.0.0.1"))
+  run("ping", c("-n", "6", "127.0.0.1"), timeout = 1,
     error_on_status = FALSE)
 }
 }

@@ -2,12 +2,11 @@
 context("poll multiple processes")
 
 test_that("single process", {
-  cmd <- switch(
-    os_type(),
-    "unix" = "sleep 1; ls",
-    "ping -n 2 127.0.0.1 && dir /b"
-  )
-  p <- process$new(commandline = cmd, stdout = "|")
+
+  px <- get_tool("px")
+  p <- process$new(px, c("sleep", "1", "outln", "foo", "outln", "bar"),
+                   stdout = "|")
+  on.exit(p$kill(), add = TRUE)
 
   ## Timeout
   expect_equal(
@@ -41,19 +40,13 @@ test_that("single process", {
 })
 
 test_that("multiple processes", {
-  cmd1 <- switch(
-    os_type(),
-    "unix" = "sleep 1; ls",
-    "ping -n 2 127.0.0.1 && dir /b"
-  )
-  cmd2 <- switch(
-    os_type(),
-    "unix" = "sleep 2; ls 1>&2",
-    "ping -n 2 127.0.0.1 && dir /b 1>&2"
-  )
 
-  p1 <- process$new(commandline = cmd1, stdout = "|")
-  p2 <- process$new(commandline = cmd2, stderr = "|")
+  px <- get_tool("px")
+  cmd1 <- c("sleep", "1", "outln", "foo", "outln", "bar")
+  cmd2 <- c("sleep", "2", "errln", "foo", "errln", "bar")
+
+  p1 <- process$new(px, cmd1, stdout = "|")
+  p2 <- process$new(px, cmd2, stderr = "|")
 
   ## Timeout
   res <- poll(list(p1 = p1, p2 = p2), 0)
@@ -92,4 +85,102 @@ test_that("multiple processes", {
     )
   )
 
+})
+
+test_that("multiple polls", {
+
+  px <- get_tool("px")
+  cmd <- c("sleep", "1", "outln", "foo", "sleep", "1", "outln", "bar")
+  p <- process$new(px, cmd, stdout = "|", stderr = "|")
+
+  out <- character()
+  while (p$is_alive()) {
+    poll(list(p), 2000)
+    out <- c(out, p$read_output_lines())
+  }
+
+  expect_identical(out, c("foo", "bar"))
+})
+
+test_that("polling and buffering", {
+
+  px <- get_tool("px")
+
+  for (i in 1:10) {
+
+    ## We set up two processes, one produces a output, that we do not
+    ## read out from the cache. The other one does not produce output.
+    p1 <- process$new(px, c(rbind("outln", 1:20), "sleep", "3"), stdout = "|", stderr = "|")
+    p2 <- process$new(px, c("sleep", "3"), stdout = "|", stderr = "|")
+
+    ## We poll until p1 has output. We read out some of the output,
+    ## and leave the rest in the buffer.
+    p1$poll_io(-1)
+    expect_equal(p1$read_output_lines(n = 1), "1")
+
+    ## Now poll should return immediately, because there is output ready
+    ## from p1. The status of p2 should be 'silent' (and not 'timeout')
+    tick <- Sys.time()
+    s <- poll(list(p1, p2), 3000)
+    expect_equal(
+      s,
+      list(
+        c(output = "ready", error = "silent"),
+        c(output = "silent", error = "silent")
+      )
+    )
+    if (s[[2]][1] != "silent") break;
+
+    p1$kill()
+    p2$kill()
+
+    ## Check that poll has returned immediately
+    dt <- Sys.time() - tick
+    expect_true(dt < as.difftime(2, units = "secs"))
+  }
+})
+
+test_that("polling and buffering #2", {
+
+  px <- get_tool("px")
+
+  ## We run this a bunch of times, because it used to fail
+  ## non-deterministically on the CI
+  for (i in 1:10) {
+
+    ## Two processes, they both produce output. For the first process,
+    ## we make sure that there is something in the buffer.
+    ## For the second process we need to poll, but data should be
+    ## available immediately.
+    p1 <- process$new(px, rbind("outln", 1:20), stdout = "|")
+    p2 <- process$new(px, rbind("outln", 21:30), stdout = "|")
+
+    ## We poll until p1 has output. We read out some of the output,
+    ## and leave the rest in the buffer.
+    p1$poll_io(-1)
+    expect_equal(p1$read_output_lines(n = 1), "1")
+
+    ## We also need to poll p2, to make sure that there is
+    ## output from it. But we don't read anything from it.
+    expect_equal(p1$poll_io(-1)[["output"]], "ready")
+    expect_equal(p2$poll_io(-1)[["output"]], "ready")
+
+    ## Now poll should return ready for both processes, and it should
+    ## return fast.
+    tick <- Sys.time()
+    s <- poll(list(p1, p2), 3000)
+    expect_equal(
+      s,
+      list(
+        c(output = "ready", error = "nopipe"),
+        c(output = "ready", error = "nopipe")
+      )
+    )
+
+    p1$kill()
+    p2$kill()
+
+    ## Check that poll has returned immediately
+    expect_true(Sys.time() - tick < as.difftime(2, units = "secs"))
+  }
 })

@@ -11,11 +11,12 @@ id of the started process, and set its standard output and error
 streams. The process id is then used to manage the process.
 }
 \section{Usage}{
-
-\preformatted{p <- process$new(command = NULL, args, commandline = NULL,
-                 stdout = TRUE, stderr = TRUE, cleanup = TRUE,
-                 echo_cmd = FALSE, windows_verbatim_args = FALSE,
-                 windows_hide_window = FALSE)
+\preformatted{p <- process$new(command = NULL, args,
+                 stdout = NULL, stderr = NULL, cleanup = TRUE,
+                 echo_cmd = FALSE, supervise = FALSE,
+                 windows_verbatim_args = FALSE,
+                 windows_hide_window = FALSE,
+                 encoding = "")
 
 p$is_alive()
 p$signal(signal)
@@ -26,16 +27,18 @@ p$get_exit_status()
 p$restart()
 p$get_start_time()
 
-p$read_output_lines(...)
-p$read_error_lines(...)
+p$read_output(n = -1)
+p$read_error(n = -1)
+p$read_output_lines(n = -1)
+p$read_error_lines(n = -1)
 p$get_output_connection()
 p$get_error_connection()
 p$is_incomplete_output()
 p$is_incomplete_error()
 p$read_all_output()
 p$read_all_error()
-p$read_all_output_lines(...)
-p$read_all_error_lines(...)
+p$read_all_output_lines()
+p$read_all_error_lines()
 
 p$poll_io(timeout)
 
@@ -45,44 +48,44 @@ print(p)
 
 \section{Arguments}{
 
-\describe{
-\item{p}{A \code{process} object.}
-\item{command}{Character scalar, the command to run.
+\itemize{
+\item \code{p}: \code{process} object.
+\item \code{command}: Character scalar, the command to run.
 Note that this argument is not passed to a shell, so no
 tilde-expansion or variable substitution is performed on it.
-It should not be quoted with \code{\link[base]{shQuote}}. See
-\code{\link[base]{normalizePath}} for tilde-expansion.}
-\item{args}{Character vector, arguments to the command. They will be
-used as is, without a shell. They don't need to be escaped.}
-\item{commandline}{A character scalar, a full command line.
-On Unix systems it runs the a shell: \code{sh -c <commandline>}.
-On Windows it uses the \code{cmd} shell:
-\code{cmd /c <commandline>}. If you want more control, then call
-your chosen shell directly.}
-\item{stdout}{What to do with the standard output. Possible values:
-\code{FALSE}: discard it; a string, redirect it to this file,
-\code{TRUE}: redirect it to a temporary file, \code{"|"}: create an
-R connection for it.}
-\item{stderr}{What to do with the standard error. Possible values:
-\code{FALSE}: discard it; a string, redirect it to this file,
-\code{TRUE}: redirect it to a temporary file, \code{"|"}: create an
-R connection for it.}
-\item{cleanup}{Whether to kill the process (and its children)
-if the \code{process} object is garbage collected.}
-\item{echo_cmd}{Whether to print the command to the screen before
-running it.}
-\item{windows_verbatim_args}{Whether to omit quoting the arguments
-on Windows. It is ignored on other platforms.}
-\item{windows_hide_window}{Whether to hide the application's window
-on Windows. It is ignored on other platforms.}
-\item{signal}{An integer scalar, the id of the signal to send to
-the process. See \code{\link[tools]{pskill}} for the list of
-signals.}
-\item{grace}{Currently not used.}
-\item{timeout}{Timeout in milliseconds, for the wait or the I/O
-polling.}
-\item{...}{Extra arguments are passed to the
-\code{\link[base]{readLines}} function.}
+It should not be quoted with \code{\link[base:shQuote]{base::shQuote()}}. See
+\code{\link[base:normalizePath]{base::normalizePath()}} for tilde-expansion.
+\item \code{args}: Character vector, arguments to the command. They will be
+used as is, without a shell. They don't need to be escaped.
+\item \code{stdout}: What to do with the standard output. Possible values:
+\code{NULL}: discard it; a string, redirect it to this file;
+\code{"|"}: create a connection for it.
+\item \code{stderr}: What to do with the standard error. Possible values:
+\code{NULL}: discard it; a string, redirect it to this file;
+\code{"|"}: create a connection for it.
+\item \code{cleanup}: Whether to kill the process (and its children)
+if the \code{process} object is garbage collected.
+\item \code{echo_cmd}: Whether to print the command to the screen before
+running it.
+\item \code{supervise}: Whether to register the process with a supervisor.
+If \code{TRUE}, the supervisor will ensure that the process is
+killed when the R process exits.
+\item \code{windows_verbatim_args}: Whether to omit quoting the arguments
+on Windows. It is ignored on other platforms.
+\item \code{windows_hide_window}: Whether to hide the application's window
+on Windows. It is ignored on other platforms.
+\item \code{signal}: An integer scalar, the id of the signal to send to
+the process. See \code{\link[tools:pskill]{tools::pskill()}} for the list of signals.
+\item \code{grace}: Currently not used.
+\item \code{timeout}: Timeout in milliseconds, for the wait or the I/O
+polling.
+\item \code{n}: Number of characters or lines to read.
+\item \code{encoding}: The encoding to assume for \code{stdout} and
+\code{stderr}. By default the encoding of the current locale is
+used. Note that \code{processx} always reencodes the output of
+both streams in UTF-8 currently. If you want to read them
+without any conversion, on all platforms, specify \code{"UTF-8"} as
+encoding.
 }
 }
 
@@ -122,12 +125,40 @@ finished and \code{NULL} otherwise.
 \code{$get_start_time()} returns the time when the process was
 started.
 
-\code{$read_output_lines()} reads from standard output connection of
-the process. If the standard output connection was not requested, then
-then it returns an error. It uses a non-blocking text connection.
+\code{$is_supervised()} returns whether the process is being tracked by
+supervisor process.
+
+\code{$supervise()} if passed \code{TRUE}, tells the supervisor to start
+tracking the process. If \code{FALSE}, tells the supervisor to stop
+tracking the process. Note that even if the supervisor is disabled for a
+process, if it was started with \code{cleanup=TRUE}, the process will
+still be killed when the object is garbage collected.
+
+\code{$read_output()} reads from the standard output connection of the
+process. If the standard output connection was not requested, then
+then it returns an error. It uses a non-blocking text connection. This
+will work only if \code{stdout="|"} was used. Otherwise, it will throw an
+error.
+
+\code{$read_error()} is similar to \code{$read_output}, but it reads
+from the standard error stream.
+
+\code{$read_output_lines()} reads lines from standard output connection
+of the process. If the standard output connection was not requested, then
+then it returns an error. It uses a non-blocking text connection. This
+will work only if \code{stdout="|"} was used. Otherwise, it will throw an
+error.
 
 \code{$read_error_lines()} is similar to \code{$read_output_lines}, but
 it reads from the standard error stream.
+
+\code{$has_output_connection()} returns \code{TRUE} if there is a connection
+object for standard output; in other words, if \code{stdout="|"}. It returns
+\code{FALSE} otherwise.
+
+\code{$has_error_connection()} returns \code{TRUE} if there is a connection
+object for standard error; in other words, if \code{stderr="|"}. It returns
+\code{FALSE} otherwise.
 
 \code{$get_output_connection()} returns a connection object, to the
 standard output stream of the process.
@@ -147,28 +178,40 @@ process exited). It return \code{TRUE} otherwise.
 It does not return until the process has finished.
 Note that this process involves waiting for the process to finish,
 polling for I/O and potentically several \code{readLines()} calls.
-It returns a character scalar.
+It returns a character scalar. This will return content only if
+\code{stdout="|"} was used. Otherwise, it will throw an error.
 
 \code{$read_all_error()} waits for all standard error from the process.
 It does not return until the process has finished.
 Note that this process involves waiting for the process to finish,
 polling for I/O and potentically several \code{readLines()} calls.
-It returns a character scalar.
+It returns a character scalar. This will return content only if
+\code{stderr="|"} was used. Otherwise, it will throw an error.
 
 \code{$read_all_output_lines()} waits for all standard output lines
 from a process. It does not return until the process has finished.
 Note that this process involves waiting for the process to finish,
 polling for I/O and potentically several \code{readLines()} calls.
-It returns a character vector.
+It returns a character vector. This will return content only if
+\code{stdout="|"} was used. Otherwise, it will throw an error.
 
 \code{$read_all_error_lines()} waits for all standard error lines from
 a process. It does not return until the process has finished.
 Note that this process involves waiting for the process to finish,
 polling for I/O and potentically several \code{readLines()} calls.
-It returns a character vector.
+It returns a character vector. This will return content only if
+\code{stderr="|"} was used. Otherwise, it will throw an error.
+
+\code{$get_output_file()} if the \code{stdout} argument was a filename,
+this returns the absolute path to the file. If \code{stdout} was \code{"|"} or
+\code{NULL}, this simply returns that value.
+
+\code{$get_error_file()} if the \code{stderr} argument was a filename,
+this returns the absolute path to the file. If \code{stderr} was \code{"|"} or
+\code{NULL}, this simply returns that value.
 
 \code{$poll_io()} polls the process's connections for I/O. See more in
-the \emph{Polling} section, and see also the \code{\link{poll}} function
+the \emph{Polling} section, and see also the \code{\link[=poll]{poll()}} function
 to poll on multiple processes.
 
 \code{print(p)} or \code{p$print()} shows some information about the
@@ -182,7 +225,7 @@ error connections of a process, with a timeout. If there is output
 in either of them, or they are closed (e.g. because the process exits)
 \code{poll_io()} returns immediately.
 
-In addition to polling a single process, the \code{\link{poll}} function
+In addition to polling a single process, the \code{\link[=poll]{poll()}} function
 can poll the output of several processes, and returns as soon as any
 of them has generated output (or exited).
 }

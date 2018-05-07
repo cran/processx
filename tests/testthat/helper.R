@@ -3,12 +3,6 @@ skip_other_platforms <- function(platform) {
   if (os_type() != platform) skip(paste("only run it on", platform))
 }
 
-skip_without_command <- function(command) {
-  if (Sys.which(command) == "") {
-    skip(paste("only run if", command, "is available"))
-  }
-}
-
 try_silently <- function(expr) {
   tryCatch(
     expr,
@@ -18,22 +12,16 @@ try_silently <- function(expr) {
   )
 }
 
-sleep <- function(n, commandline = TRUE) {
-
-  if (os_type() == "windows") {
-    if (commandline) {
-      paste("ping -n", n + 1L, "127.0.0.1 > NUL")
-    } else {
-      c("ping", "-n", as.character(n + 1L), "127.0.0.1")
-    }
-
-  } else {
-    if (commandline) {
-      paste("(sleep", n, ")")
-    } else {
-      c("sleep", as.character(n))
-    }
+get_tool <- function(prog) {
+  if (os_type() == "windows") prog <- paste0(prog, ".exe")
+  exe <- system.file(package = "processx", "bin", .Platform$r_arch, prog)
+  if (exe == "") {
+    pkgpath <- system.file(package = "processx")
+    if (basename(pkgpath) == "inst") pkgpath <- dirname(pkgpath)
+    exe <- file.path(pkgpath, "src", "tools", prog)
+    if (!file.exists(exe)) return("")
   }
+  exe
 }
 
 get_pid_by_name <- function(name) {

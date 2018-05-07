@@ -1,18 +1,68 @@
 
-#ifdef WIN32
-
-#include <windows.h>
-
-#include "processx-win.h"
-
+#include <R.h>
 #include <R_ext/Rdynload.h>
 
+#include "../processx.h"
+
+static HANDLE processx__global_job_handle = NULL;
+
+static void processx__init_global_job_handle(void) {
+  /* Create a job object and set it up to kill all contained processes when
+   * it's closed. Since this handle is made non-inheritable and we're not
+   * giving it to anyone, we're the only process holding a reference to it.
+   * That means that if this process exits it is closed and all the
+   * processes it contains are killed. All processes created with processx
+   * that are spawned without the cleanup flag are assigned to this job.
+   *
+   * We're setting the JOB_OBJECT_LIMIT_SILENT_BREAKAWAY_OK flag so only
+   * the processes that we explicitly add are affected, and *their*
+   * subprocesses are not. This ensures that our child processes are not
+   * limited in their ability to use job control on Windows versions that
+   * don't deal with nested jobs (prior to Windows 8 / Server 2012). It
+   * also lets our child processes create detached processes without
+   * explicitly breaking away from job control (which processx_exec
+   * doesn't do, either). */
+
+  SECURITY_ATTRIBUTES attr;
+  JOBOBJECT_EXTENDED_LIMIT_INFORMATION info;
+
+  memset(&attr, 0, sizeof attr);
+  attr.bInheritHandle = FALSE;
+
+  memset(&info, 0, sizeof info);
+  info.BasicLimitInformation.LimitFlags =
+      JOB_OBJECT_LIMIT_BREAKAWAY_OK |
+      JOB_OBJECT_LIMIT_SILENT_BREAKAWAY_OK |
+      JOB_OBJECT_LIMIT_DIE_ON_UNHANDLED_EXCEPTION |
+      JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE;
+
+  processx__global_job_handle = CreateJobObjectW(&attr, NULL);
+  if (processx__global_job_handle == NULL) {
+    PROCESSX_ERROR("Creating global job object", GetLastError());
+  }
+
+  if (!SetInformationJobObject(processx__global_job_handle,
+                               JobObjectExtendedLimitInformation,
+                               &info,
+                               sizeof info)) {
+    PROCESSX_ERROR("Setting up global job object", GetLastError());
+  }
+}
+
+void R_init_processx_win() {
+  /* Nothing to do currently */
+}
+
 SEXP processx__killem_all() {
-  /* TODO */
+  if (processx__global_job_handle) {
+    TerminateJobObject(processx__global_job_handle, 1);
+    CloseHandle(processx__global_job_handle);
+    processx__global_job_handle = NULL;
+  }
   return R_NilValue;
 }
 
-int uv_utf8_to_utf16_alloc(const char* s, WCHAR** ws_ptr) {
+int processx__utf8_to_utf16_alloc(const char* s, WCHAR** ws_ptr) {
   int ws_len, r;
   WCHAR* ws;
 
@@ -501,47 +551,51 @@ void processx__error(const char *message, DWORD errorcode,
 
 void processx__collect_exit_status(SEXP status, DWORD exitcode);
 
+DWORD processx__terminate(processx_handle_t *handle, SEXP status) {
+  DWORD err;
+
+  err = TerminateProcess(handle->hProcess, 2);
+  if (err) processx__collect_exit_status(status, 2);
+
+  WaitForSingleObject(handle->hProcess, INFINITE);
+  CloseHandle(handle->hProcess);
+  handle->hProcess = 0;
+  return err;
+}
+
+SEXP processx__disconnect_process_handle(SEXP status) {
+  R_SetExternalPtrTag(status, R_NilValue);
+  return R_NilValue;
+}
+
 void processx__finalizer(SEXP status) {
   processx_handle_t *handle = (processx_handle_t*) R_ExternalPtrAddr(status);
   SEXP private;
-  DWORD err;
 
   if (!handle) return;
 
-  if (handle->cleanup) {
+  if (handle->cleanup && !handle->collected) {
     /* Just in case it is running */
-    if (handle->job) TerminateJobObject(handle->job, 1);
-    err = TerminateProcess(handle->hProcess, 1);
-    if (err) processx__collect_exit_status(status, 1);
-    WaitForSingleObject(handle->hProcess, INFINITE);
+    processx__terminate(handle, status);
   }
 
   /* Copy over pid and exit status */
-  private = R_ExternalPtrTag(status);
-  defineVar(install("exited"), ScalarLogical(1), private);
-  defineVar(install("pid"), ScalarInteger(handle->dwProcessId), private);
-  defineVar(install("exitcode"), ScalarInteger(handle->exitcode), private);
+  private = PROTECT(R_ExternalPtrTag(status));
+  if (!isNull(private)) {
+    SEXP sone = PROTECT(ScalarLogical(1));
+    SEXP spid = PROTECT(ScalarInteger(handle->dwProcessId));
+    SEXP sexitcode = PROTECT(ScalarInteger(handle->exitcode));
+
+    defineVar(install("exited"), sone, private);
+    defineVar(install("pid"), spid, private);
+    defineVar(install("exitcode"), sexitcode, private);
+    UNPROTECT(3);
+  }
+  UNPROTECT(1);
 
   if (handle->hProcess) CloseHandle(handle->hProcess);
-  if (handle->job) CloseHandle(handle->job);
-  processx__handle_destroy(handle);
   R_ClearExternalPtr(status);
-}
-
-/* This is not strictly necessary, but we might as well do it.... */
-
-static void CALLBACK processx__exit_callback(void* data, BOOLEAN didTimeout) {
-  processx_handle_t *handle = (processx_handle_t *) data;
-  DWORD err, exitcode;
-
-  /* Still need to wait a bit, otherwise we might crash.... */
-  WaitForSingleObject(handle->hProcess, INFINITE);
-  err = GetExitCodeProcess(handle->hProcess, &exitcode);
-  if (!err) return;
-
-  if (handle->collected) return;
-  handle->exitcode = exitcode;
-  handle->collected = 1;
+  processx__handle_destroy(handle);
 }
 
 SEXP processx__make_handle(SEXP private, int cleanup) {
@@ -568,10 +622,11 @@ void processx__handle_destroy(processx_handle_t *handle) {
 
 SEXP processx_exec(SEXP command, SEXP args, SEXP std_out, SEXP std_err,
 		   SEXP windows_verbatim_args, SEXP windows_hide,
-		   SEXP private, SEXP cleanup) {
+		   SEXP private, SEXP cleanup, SEXP encoding) {
 
   const char *cstd_out = isNull(std_out) ? 0 : CHAR(STRING_ELT(std_out, 0));
   const char *cstd_err = isNull(std_err) ? 0 : CHAR(STRING_ELT(std_err, 0));
+  const char *cencoding = CHAR(STRING_ELT(encoding, 0));
 
   int err = 0;
   WCHAR *path;
@@ -585,13 +640,13 @@ SEXP processx_exec(SEXP command, SEXP args, SEXP std_out, SEXP std_err,
   processx_handle_t *handle;
   int ccleanup = INTEGER(cleanup)[0];
   SEXP result;
-  BOOLEAN regerr;
   DWORD dwerr;
 
   options.windows_verbatim_args = LOGICAL(windows_verbatim_args)[0];
   options.windows_hide = LOGICAL(windows_hide)[0];
 
-  err = uv_utf8_to_utf16_alloc(CHAR(STRING_ELT(command, 0)), &application);
+  err = processx__utf8_to_utf16_alloc(CHAR(STRING_ELT(command, 0)),
+				      &application);
   if (err) { PROCESSX_ERROR("utf8 -> utf16 conversion", err); }
 
   err = processx__make_program_args(
@@ -638,11 +693,17 @@ SEXP processx_exec(SEXP command, SEXP args, SEXP std_out, SEXP std_err,
   handle = R_ExternalPtrAddr(result);
 
   err = processx__stdio_create(handle, cstd_out, cstd_err,
-			       &handle->child_stdio_buffer, private);
+			       &handle->child_stdio_buffer, private,
+			       cencoding);
   if (err) { PROCESSX_ERROR("setup stdio", err); }
 
   application_path = processx__search_path(application, cwd, path);
-  if (!application_path) { free(handle); error("Command not found"); }
+  if (!application_path) {
+    R_ClearExternalPtr(result);
+    processx__stdio_destroy(handle->child_stdio_buffer);
+    free(handle);
+    error("Command not found");
+  }
 
   startup.cb = sizeof(startup);
   startup.lpReserved = NULL;
@@ -659,9 +720,23 @@ SEXP processx_exec(SEXP command, SEXP args, SEXP std_out, SEXP std_err,
   startup.wShowWindow = options.windows_hide ? SW_HIDE : SW_SHOWDEFAULT;
 
   process_flags = CREATE_UNICODE_ENVIRONMENT |
-    CREATE_BREAKAWAY_FROM_JOB |
     CREATE_SUSPENDED |
     CREATE_NO_WINDOW;
+
+  if (!ccleanup) {
+    /* Note that we're not setting the CREATE_BREAKAWAY_FROM_JOB flag. That
+     * means that processx might not let you create a fully deamonized
+     * process when run under job control. However the type of job control
+     * that processx itself creates doesn't trickle down to subprocesses
+     * so they can still daemonize.
+     *
+     * A reason to not do this is that CREATE_BREAKAWAY_FROM_JOB makes the
+     * CreateProcess call fail if we're under job control that doesn't
+     * allow breakaway.
+     */
+
+    process_flags |= DETACHED_PROCESS | CREATE_NEW_PROCESS_GROUP;
+  }
 
   err = CreateProcessW(
     /* lpApplicationName =    */ application_path,
@@ -675,32 +750,37 @@ SEXP processx_exec(SEXP command, SEXP args, SEXP std_out, SEXP std_err,
     /* lpStartupInfo =        */ &startup,
     /* lpProcessInformation = */ &info);
 
-  if (!err) { PROCESSX_ERROR("create process", err); }
+  if (!err) { PROCESSX_ERROR("create process", GetLastError()); }
 
   handle->hProcess = info.hProcess;
   handle->dwProcessId = info.dwProcessId;
-  handle->job = CreateJobObject(NULL, NULL);
-  if (!handle->job) PROCESSX_ERROR("create job object", GetLastError());
 
-  regerr = AssignProcessToJobObject(handle->job, handle->hProcess);
-  if (!regerr) PROCESSX_ERROR("assign job to job object", GetLastError());
+  /* If the process isn't spawned as detached, assign to the global job */
+  /* object so windows will kill it when the parent process dies. */
+  if (!ccleanup) {
+    if (! processx__global_job_handle) processx__init_global_job_handle();
+
+    if (!AssignProcessToJobObject(processx__global_job_handle, info.hProcess)) {
+      /* AssignProcessToJobObject might fail if this process is under job
+       * control and the job doesn't have the
+       * JOB_OBJECT_LIMIT_SILENT_BREAKAWAY_OK flag set, on a Windows
+       * version that doesn't support nested jobs.
+       *
+       * When that happens we just swallow the error and continue without
+       * establishing a kill-child-on-parent-exit relationship, otherwise
+       * there would be no way for R/processx applications run under job
+       * control to spawn processes at all.
+       */
+      DWORD err = GetLastError();
+      if (err != ERROR_ACCESS_DENIED) {
+	PROCESSX_ERROR("Assign to job object", err);
+      }
+    }
+  }
 
   dwerr = ResumeThread(info.hThread);
   if (dwerr == (DWORD) -1) PROCESSX_ERROR("resume thread", GetLastError());
   CloseHandle(info.hThread);
-
-  regerr = RegisterWaitForSingleObject(
-    &handle->waitObject,
-    handle->hProcess,
-    processx__exit_callback,
-    (void*) handle,
-    /* dwMilliseconds = */ INFINITE,
-    WT_EXECUTEINWAITTHREAD | WT_EXECUTEONLYONCE);
-
-  if (!regerr) {
-    /* This also kills the process, in the finalizer */
-    PROCESSX_ERROR("register wait for process object", GetLastError());
-  }
 
   processx__stdio_destroy(handle->child_stdio_buffer);
   handle->child_stdio_buffer = NULL;
@@ -808,15 +888,13 @@ SEXP processx_signal(SEXP status, SEXP signal) {
     }
 
     if (exitcode == STILL_ACTIVE) {
-      TerminateJobObject(handle->job, 1);
-      handle->job = NULL;
-      err = TerminateProcess(handle->hProcess, 1);
-      if (err) {
-	processx__collect_exit_status(status, 1);
-	return ScalarLogical(0);
-      } else {
-	return ScalarLogical(1);
-      }
+
+      /* We only cleanup the tree if the process is still running. */
+      /* TODO: we are not running this for now, until we can properly
+	 work around pid reuse. */
+      /* processx__cleanup_child_tree(handle->dwProcessId); */
+      err = processx__terminate(handle, status);
+      return ScalarLogical(err != 0);
 
     } else {
       processx__collect_exit_status(status, exitcode);
@@ -878,5 +956,3 @@ SEXP processx__process_exists(SEXP pid) {
     return ScalarLogical(exitcode == STILL_ACTIVE);
   }
 }
-
-#endif
