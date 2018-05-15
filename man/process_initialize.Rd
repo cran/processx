@@ -4,8 +4,9 @@
 \alias{process_initialize}
 \title{Start a process}
 \usage{
-process_initialize(self, private, command, args, stdout, stderr, cleanup,
-  echo_cmd, supervise, windows_verbatim_args, windows_hide_window, encoding)
+process_initialize(self, private, command, args, stdout, stderr, cleanup, wd,
+  echo_cmd, supervise, windows_verbatim_args, windows_hide_window, encoding,
+  post_process)
 }
 \arguments{
 \item{self}{this}
@@ -22,11 +23,15 @@ process_initialize(self, private, command, args, stdout, stderr, cleanup,
 
 \item{cleanup}{Kill on GC?}
 
+\item{wd}{working directory (or NULL)}
+
 \item{echo_cmd}{Echo command before starting it?}
 
 \item{supervise}{Should the process be supervised?}
 
 \item{encoding}{Assumed stdout and stderr encoding.}
+
+\item{post_process}{Post processing function.}
 }
 \description{
 Start a process

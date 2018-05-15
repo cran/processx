@@ -5,6 +5,7 @@
 
 > Execute and Control System Processes
 
+[![lifecycle](https://img.shields.io/badge/lifecycle-maturing-blue.svg)](https://tidyverse.org/lifecycle/#maturing)
 [![Linux Build Status](https://travis-ci.org/r-lib/processx.svg?branch=master)](https://travis-ci.org/r-lib/processx)
 [![Windows Build status](https://ci.appveyor.com/api/projects/status/15sfg3l9mm4aseyf/branch/master?svg=true)](https://ci.appveyor.com/project/gaborcsardi/processx)
 [![](https://www.r-pkg.org/badges/version/processx)](https://www.r-pkg.org/pkg/processx)
@@ -14,7 +15,7 @@
 Tools to run system processes in the background,
 read their standard output and error, kill and restart them.
 
-`processx` can poll the standard output and error of a single process,
+processx can poll the standard output and error of a single process,
 or multiple processes, using the operating system's polling and waiting
 facilities, with a timeout.
 
@@ -23,7 +24,7 @@ facilities, with a timeout.
    * [Features](#features)
    * [Installation](#installation)
    * [Usage](#usage)
-      * [Runing an external process](#runing-an-external-process)
+      * [Running an external process](#running-an-external-process)
          * [Errors](#errors)
          * [Showing output](#showing-output)
          * [Spinner](#spinner)
@@ -38,6 +39,7 @@ facilities, with a timeout.
          * [Waiting on a process](#waiting-on-a-process)
          * [Exit statuses](#exit-statuses)
          * [Errors](#errors-1)
+   * [Code of Conduct](#code-of-conduct)
    * [License](#license)
 
 ## Features
@@ -57,9 +59,18 @@ facilities, with a timeout.
 * Restart background processes.
 * Works on Linux, macOS and Windows.
 * Lightweight, it only depends on the also lightweight
-  `R6`, `assertthat`, `crayon` and `debugme` packages.
+  R6, assertthat and crayon packages.
 
 ## Installation
+
+Install the stable version from CRAN:
+
+
+```r
+install.packages("processx")
+```
+
+Install the development version from GitHub:
 
 
 ```r
@@ -92,7 +103,7 @@ px
 #> [1] "/Users/gaborcsardi/r_pkgs/processx/bin/px"
 ```
 
-### Runing an external process
+### Running an external process
 
 The `run()` function runs an external command. It requires a single command,
 and a character vector of arguments. You don't need to quote the command
@@ -126,15 +137,17 @@ result <- run(px, "--help", echo = TRUE)
 
 ```
 #> Usage: px [command arg] [command arg] ...
-#>   Commands: sleep  <seconds>  -- sleep for a number os seconds
+#> 
+#> Commands:   sleep  <seconds>  -- sleep for a number os seconds
 #>             out    <string>   -- print string to stdout
 #>             err    <string>   -- print string to stderr
 #>             outln  <string>   -- print string to stdout, add newline
 #>             errln  <string>   -- print string to stderr, add newline
+#>             cat    <filename> -- print file to stdout
 #>             return <exitcode> -- return with exitcode
 ```
 
-> Note: From version 3.0.1, `processx` does not let you specify a full
+> Note: From version 3.0.1, processx does not let you specify a full
 > shell command line, as this involves starting a grandchild process from
 > the child process, and it is difficult to clean up the grandchild
 > process when the child process is killed. The user can still start a
@@ -234,10 +247,12 @@ out2
 ```
 
 ```
-#>  [1] "DESCRIPTION"     "LICENSE"         "Makefile"       
-#>  [4] "NAMESPACE"       "R"               "README.Rmd"     
-#>  [7] "README.markdown" "appveyor.yml"    "inst"           
-#> [10] "man"             "src"             "tests"
+#>  [1] "CODE_OF_CONDUCT.md" "DESCRIPTION"        "LICENSE"           
+#>  [4] "Makefile"           "NAMESPACE"          "NEWS.md"           
+#>  [7] "R"                  "README.Rmd"         "README.markdown"   
+#> [10] "_pkgdown.yml"       "appveyor.yml"       "docs"              
+#> [13] "inst"               "man"                "src"               
+#> [16] "tests"
 ```
 
 #### Spinner
@@ -390,8 +405,8 @@ gc()
 
 ```
 #>          used (Mb) gc trigger (Mb) max used (Mb)
-#> Ncells 421150 22.5     750400 40.1   592000 31.7
-#> Vcells 836899  6.4    1650153 12.6  1080710  8.3
+#> Ncells 422094 22.6     750400 40.1   592000 31.7
+#> Vcells 839667  6.5    1650153 12.6  1097560  8.4
 ```
 
 Here, the direct call to the garbage collector kills the `sleep` process
@@ -401,8 +416,8 @@ as well. See the `cleanup` option if you want to avoid this behavior.
 
 By default the standard output and error of the processes are ignored.
 You can set the `stdout` and `stderr` constructor arguments to a file name,
-and then they are redirected there, or to `"|"`, and then `processx` creates
-connections to them. (Note that starting from `processx` 3.0.0 these
+and then they are redirected there, or to `"|"`, and then processx creates
+connections to them. (Note that starting from processx 3.0.0 these
 connections are not regular R connections, because the public R connection
 API was retroactively removed from R.)
 
@@ -432,7 +447,7 @@ is data available to read, you need to poll, see below.
 
 ```r
 p <- process$new(px,
-  c("outln", "foo", "errln", "bar", "outln", "foobar"),
+  c("sleep", "1", "outln", "foo", "errln", "bar", "outln", "foobar"),
   stdout = "|", stderr = "|")
 p$read_output_lines()
 ```
@@ -446,7 +461,7 @@ p$read_error_lines()
 ```
 
 ```
-#> [1] "bar"
+#> character(0)
 ```
 
 #### End of output
@@ -509,7 +524,7 @@ p$read_output_lines()
 #### Polling multiple processes
 
 If you need to manage multiple background processes, and need to wait
-for output from all of them, `processx` defines a `poll()` function that
+for output from all of them, processx defines a `poll()` function that
 does just that. It is similar to the `poll_io()` method, but it takes
 multiple process objects, and returns as soon as one of them have data
 on standard output or error, or a timeout expires. Here is an example:
@@ -610,7 +625,7 @@ Sys.time()
 ```
 
 ```
-#> [1] "2017-12-07 22:33:28 GMT"
+#> [1] "2018-05-13 20:54:19 BST"
 ```
 
 ```r
@@ -619,7 +634,7 @@ Sys.time()
 ```
 
 ```
-#> [1] "2017-12-07 22:33:30 GMT"
+#> [1] "2018-05-13 20:54:21 BST"
 ```
 
 It is safe to call `wait()` multiple times:
@@ -656,7 +671,7 @@ p$get_exit_status()
 
 #### Errors
 
-Errors are typically signalled via non-zero exits statuses. The `processx`
+Errors are typically signalled via non-zero exits statuses. The processx
 constructor fails if the external program cannot be started,
 but it does not deal with errors that happen after the
 program has successfully started running.
@@ -667,7 +682,7 @@ p <- process$new("nonexistant-command-for-sure")
 ```
 
 ```
-#> Error in process_initialize(self, private, command, args : processx error
+#> Error in process_initialize(self, private, command, args, stdout, stderr, : processx error: 'No such file or directory' at unix/processx.c:378
 ```
 
 
@@ -678,8 +693,13 @@ p2$get_exit_status()
 ```
 
 ```
-#> [1] 2
+#> [1] 5
 ```
+
+## Code of Conduct
+
+Please note that this project is released with a [Contributor Code of Conduct](CODE_OF_CONDUCT.md).
+By participating in this project you agree to abide by its terms.
 
 ## License
 

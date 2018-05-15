@@ -2,6 +2,11 @@
 #ifndef PROCESSX_CONNECTION_H
 #define PROCESSX_CONNECTION_H
 
+#ifdef __INTEL_COMPILER
+#define _BSD_SOURCE 1
+#define _POSIX_C_SOURCE  200809L
+#endif
+
 #include <Rinternals.h>
 #include <R_ext/Riconv.h>
 
@@ -55,6 +60,7 @@ typedef struct processx_connection_s {
   size_t utf8_allocated_size;
   size_t utf8_data_size;
 
+  int poll_idx;
 } processx_connection_t;
 
 /* Generic poll method
@@ -173,6 +179,11 @@ int processx_c_pollable_from_connection(
 
 #ifndef _WIN32
 typedef unsigned long DWORD;
+#endif
+
+#ifdef _WIN32
+extern HANDLE processx__connection_iocp;
+HANDLE processx__get_default_iocp();
 #endif
 
 #define PROCESSX_ERROR(m,c) processx__error((m),(c),__FILE__,__LINE__)

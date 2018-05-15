@@ -84,7 +84,7 @@ SEXP processx_connection_read_chars(SEXP con, SEXP nchars) {
   processx__connection_find_chars(ccon, cnchars, -1, &utf8_chars,
 				  &utf8_bytes);
 
-  result = PROTECT(ScalarString(mkCharLenCE(ccon->utf8, utf8_bytes,
+  result = PROTECT(ScalarString(mkCharLenCE(ccon->utf8, (int) utf8_bytes,
 					    CE_UTF8)));
   ccon->utf8_data_size -= utf8_bytes;
   memmove(ccon->utf8, ccon->utf8 + utf8_bytes, ccon->utf8_data_size);
@@ -111,7 +111,8 @@ SEXP processx_connection_read_lines(SEXP con, SEXP nlines) {
     slashr = ccon->utf8[eol - 1] == '\r';
     SET_STRING_ELT(
       result, l,
-      mkCharLenCE(ccon->utf8 + newline + 1, eol - newline - 1 - slashr, CE_UTF8));
+      mkCharLenCE(ccon->utf8 + newline + 1,
+		  (int) (eol - newline - 1 - slashr), CE_UTF8));
     newline = eol;
   }
 
@@ -119,7 +120,8 @@ SEXP processx_connection_read_lines(SEXP con, SEXP nlines) {
     eol = ccon->utf8_data_size - 1;
     SET_STRING_ELT(
       result, l,
-      mkCharLenCE(ccon->utf8 + newline + 1, eol - newline, CE_UTF8));
+      mkCharLenCE(ccon->utf8 + newline + 1,
+		  (int) (eol - newline), CE_UTF8));
   }
 
   if (eol >= 0) {
@@ -210,6 +212,16 @@ processx_connection_t *processx_c_connection_create(
     PROCESSX_ERROR("Cannot create connection event", GetLastError());
     return 0; 			/* never reached */
   }
+
+  HANDLE iocp = processx__get_default_iocp();
+  HANDLE res = CreateIoCompletionPort(
+    /* FileHandle =  */                con->handle.handle,
+    /* ExistingCompletionPort = */     iocp,
+    /* CompletionKey = */              (ULONG_PTR) con,
+    /* NumberOfConcurrentThreads = */  0);
+
+  if (!res) PROCESSX_ERROR("cannot add file to IOCP", GetLastError());
+
 #else
   con->handle = os_handle;
 #endif
@@ -340,7 +352,10 @@ int processx_c_connection_is_eof(processx_connection_t *ccon) {
 /* Close */
 void processx_c_connection_close(processx_connection_t *ccon) {
 #ifdef _WIN32
-  if (ccon->handle.handle) CloseHandle(ccon->handle.handle);
+  if (ccon->handle.handle) {
+    CancelIo(ccon->handle.handle);
+    CloseHandle(ccon->handle.handle);
+  }
   ccon->handle.handle = 0;
   if (ccon->handle.overlapped.hEvent) {
     CloseHandle(ccon->handle.overlapped.hEvent);
@@ -364,13 +379,14 @@ int processx_c_connection_poll(processx_pollable_t pollables[],
 
   int hasdata = 0;
   size_t i, j = 0;
-  HANDLE *handles;
   int *ptr;
-  DWORD waitres;
   int timeleft = timeout;
+  HANDLE iocp = processx__get_default_iocp();
+  DWORD bytes;
+  OVERLAPPED *overlapped = 0;
+  ULONG_PTR key;
 
   ptr = (int*) R_alloc(npollables, sizeof(int));
-  handles = (HANDLE*) R_alloc(npollables, sizeof(HANDLE));
 
   for (i = 0; i < npollables; i++) {
     processx_pollable_t *el = pollables + i;
@@ -382,7 +398,6 @@ int processx_c_connection_poll(processx_pollable_t pollables[],
     } else if (el->event == PXREADY) {
       hasdata++;
     } else if (el->event == PXSILENT && handle != 0) {
-      handles[j] = handle;
       ptr[j] = i;
       j++;
     } else {
@@ -394,40 +409,57 @@ int processx_c_connection_poll(processx_pollable_t pollables[],
 
   if (hasdata) timeout = timeleft = 0;
 
-  waitres = WAIT_TIMEOUT;
-  while (timeout < 0 || timeleft > PROCESSX_INTERRUPT_INTERVAL) {
-    waitres = WaitForMultipleObjects(
-      j,
-      handles,
-      /* bWaitAll = */ FALSE,
-      PROCESSX_INTERRUPT_INTERVAL);
-    if (waitres != WAIT_TIMEOUT) break;
+  while (timeout < 0 || timeleft >= 0) {
+    int poll_timeout;
+    if (timeout < 0 || timeleft > PROCESSX_INTERRUPT_INTERVAL) {
+      poll_timeout = PROCESSX_INTERRUPT_INTERVAL;
+    } else {
+      poll_timeout = timeleft;
+    }
+
+    GetQueuedCompletionStatus(
+      /* CompletionPort  = */ iocp,
+      /* lpNumberOfBytes = */ &bytes,
+      /* lpCompletionKey = */ &key,
+      /* lpOverlapped    = */ &overlapped,
+      /* dwMilliseconds  = */ poll_timeout);
+
+    if (overlapped) {
+      /* data */
+      processx_connection_t *con = (processx_connection_t*) key;
+      int poll_idx = con->poll_idx;
+      con->handle.read_pending = FALSE;
+      con->buffer_data_size += bytes;
+      if (con->buffer_data_size > 0) processx__connection_to_utf8(con);
+      if (con->type == PROCESSX_FILE_TYPE_ASYNCFILE) {
+	/* TODO: larget files */
+	con->handle.overlapped.Offset += bytes;
+      }
+
+      if (!bytes) {
+	con->is_eof_raw_ = 1;
+	if (con->utf8_data_size == 0 && con->buffer_data_size == 0) {
+	  con->is_eof_ = 1;
+	}
+      }
+
+      if (poll_idx < npollables &&
+	  pollables[poll_idx].object == con) {
+	pollables[poll_idx].event = PXREADY;
+	hasdata++;
+	break;
+      }
+
+    } else if (GetLastError() != WAIT_TIMEOUT) {
+      PROCESSX_ERROR("Cannot poll", GetLastError());
+    }
 
     R_CheckUserInterrupt();
     timeleft -= PROCESSX_INTERRUPT_INTERVAL;
   }
 
-  /* Maybe some time left from the timeout */
-  if (waitres == WAIT_TIMEOUT && timeleft > 0) {
-    waitres = WaitForMultipleObjects(
-      j,
-      handles,
-      /* bWaitAll = */ FALSE,
-      timeleft);
-  }
-
-  if (waitres == WAIT_FAILED) {
-    PROCESSX_ERROR("waiting in poll", GetLastError());
-
-  } else if (waitres == WAIT_TIMEOUT) {
-    if (hasdata == 0) {
-      for (i = 0; i < j; i++) pollables[ptr[i]].event = PXTIMEOUT;
-    }
-
-  } else {
-    int ready = waitres - WAIT_OBJECT_0;
-    pollables[ptr[ready]].event = PXREADY;
-    hasdata++;
+  if (hasdata == 0) {
+    for (i = 0; i < j; i++) pollables[ptr[i]].event = PXTIMEOUT;
   }
 
   return hasdata;
@@ -471,7 +503,7 @@ int processx_c_connection_poll(processx_pollable_t pollables[],
       fds[j].fd = handle;
       fds[j].events = POLLIN;
       fds[j].revents = 0;
-      ptr[j] = i;
+      ptr[j] = (int) i;
       j++;
     } else {
       error("Cannot poll pollable: not ready and no fd");
@@ -485,7 +517,8 @@ int processx_c_connection_poll(processx_pollable_t pollables[],
 
   /* If we already have some data, then we don't wait any more,
      just check if other connections are ready */
-  ret = processx__interruptible_poll(fds, j, hasdata > 0 ? 0 : timeout);
+  ret = processx__interruptible_poll(fds, (nfds_t) j,
+				     hasdata > 0 ? 0 : timeout);
 
   if (ret == -1) {
     error("Processx poll error: %s", strerror(errno));
@@ -539,8 +572,9 @@ void processx__connection_start_read(processx_connection_t *ccon) {
     if (err == ERROR_BROKEN_PIPE || err == ERROR_HANDLE_EOF) {
       ccon->is_eof_raw_ = 1;
       if (ccon->utf8_data_size == 0 && ccon->buffer_data_size == 0) {
-	ccon->is_eof_ = 1;
+        ccon->is_eof_ = 1;
       }
+      if (ccon->buffer_data_size) processx__connection_to_utf8(ccon);
     } else if (err == ERROR_IO_PENDING) {
       ccon->handle.read_pending = TRUE;
     } else {
@@ -548,13 +582,9 @@ void processx__connection_start_read(processx_connection_t *ccon) {
       PROCESSX_ERROR("reading from connection", err);
     }
   } else {
-    /* Returned synchronously. */
-    ccon->handle.read_pending = FALSE;
-    ccon->buffer_data_size += bytes_read;
-    if (ccon->type == PROCESSX_FILE_TYPE_ASYNCFILE) {
-      /* TODO: large files */
-      ccon->handle.overlapped.Offset += bytes_read;
-    }
+    /* Returned synchronously, but the event will be still signalled,
+       so we just drop the sync data for now. */
+    ccon->handle.read_pending  = TRUE;
   }
 }
 
@@ -598,7 +628,7 @@ int processx_i_poll_func_connection(
   PROCESSX__I_POLL_FUNC_CONNECTION_READY;
 
 #ifdef _WIN32
-  processx__connection_read(ccon);
+  processx__connection_start_read(ccon);
   /* Starting to read may actually get some data, or an EOF, so check again */
   PROCESSX__I_POLL_FUNC_CONNECTION_READY;
   if (handle) *handle = ccon->handle.overlapped.hEvent;
@@ -786,10 +816,13 @@ static void processx__connection_alloc(processx_connection_t *ccon) {
    other buffer is transient, even if there are no newline characters. */
 
 static void processx__connection_realloc(processx_connection_t *ccon) {
-  void *nb = realloc(ccon->utf8, ccon->utf8_allocated_size * 1.2);
+  size_t new_size = (size_t) (ccon->utf8_allocated_size * 1.2);
+  void *nb;
+  if (new_size == ccon->utf8_allocated_size) new_size = 2 * new_size;
+  nb = realloc(ccon->utf8, new_size);
   if (!nb) error("Cannot allocate memory for processx line");
   ccon->utf8 = nb;
-  ccon->utf8_allocated_size = ccon->utf8_allocated_size * 1.2;
+  ccon->utf8_allocated_size = new_size;
 }
 
 /* Read as much as we can. This is the only function that explicitly
@@ -803,7 +836,6 @@ static void processx__connection_realloc(processx_connection_t *ccon) {
 
 static ssize_t processx__connection_read(processx_connection_t *ccon) {
   DWORD todo, bytes_read = 0;
-  BOOLEAN result;
 
   /* Nothing to read, nothing to convert to UTF8 */
   if (ccon->is_eof_raw_ && ccon->buffer_data_size == 0) {
@@ -822,45 +854,49 @@ static ssize_t processx__connection_read(processx_connection_t *ccon) {
 
   /* A read might be pending at this point. See if it has finished. */
   if (ccon->handle.read_pending) {
-    result = GetOverlappedResult(
-      /* hFile = */                      &ccon->handle.handle,
-      /* lpOverlapped = */               &ccon->handle.overlapped,
-      /* lpNumberOfBytesTransferred = */ &bytes_read,
-      /* bWait = */                      FALSE);
+    HANDLE iocp = processx__get_default_iocp();
+    ULONG_PTR key;
+    DWORD bytes;
+    OVERLAPPED *overlapped = 0;
 
-    if (!result) {
-      DWORD err = GetLastError();
-      if (err == ERROR_BROKEN_PIPE || err == ERROR_HANDLE_EOF) {
-	ccon->handle.read_pending = FALSE;
-	ccon->is_eof_raw_ = 1;
-	if (ccon->utf8_data_size == 0 && ccon->buffer_data_size == 0) {
-	  ccon->is_eof_ = 1;
+    while (1) {
+      GetQueuedCompletionStatus(
+        /* CompletionPort  = */ iocp,
+	/* lpNumberOfBytes = */ &bytes,
+	/* lpCompletionKey = */ &key,
+	/* lpOverlapped    = */ &overlapped,
+	/* dwMilliseconds  = */ 0);
+
+      if (overlapped) {
+	processx_connection_t *con = (processx_connection_t *) key;
+	con->handle.read_pending = FALSE;
+	con->buffer_data_size += bytes;
+	if (con->buffer && con->buffer_data_size > 0) {
+	  bytes = processx__connection_to_utf8(con);
 	}
-	bytes_read = 0;
+	if (con->type == PROCESSX_FILE_TYPE_ASYNCFILE) {
+	  /* TODO: large files */
+	  con->handle.overlapped.Offset += bytes;
+	}
+	if (!bytes) {
+	  con->is_eof_raw_ = 1;
+	  if (con->utf8_data_size == 0 && con->buffer_data_size == 0) {
+	    con->is_eof_ = 1;
+	  }
+	}
 
-      } else if (err == ERROR_IO_INCOMPLETE) {
+	if (con == ccon) {
+	  bytes_read = bytes;
+	  break;
+	}
+
+      } else if (GetLastError() != WAIT_TIMEOUT) {
+	PROCESSX_ERROR("Read error", GetLastError());
 
       } else {
-	ccon->handle.read_pending = FALSE;
-	PROCESSX_ERROR("getting overlapped result in connection read", err);
-	return 0;			/* never called */
-      }
-
-    } else {
-      ccon->handle.read_pending = FALSE;
-      ccon->buffer_data_size += bytes_read;
-      if (ccon->type == PROCESSX_FILE_TYPE_ASYNCFILE) {
-	/* TODO: large files */
-	ccon->handle.overlapped.Offset += bytes_read;
+	break;
       }
     }
-  }
-
-  /* If there is anything to convert to UTF8, try converting */
-  if (ccon->buffer_data_size > 0) {
-    bytes_read = processx__connection_to_utf8(ccon);
-  } else {
-    bytes_read = 0;
   }
 
   return bytes_read;

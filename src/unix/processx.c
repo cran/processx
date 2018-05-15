@@ -3,6 +3,8 @@
 
 #include "../processx.h"
 
+#include <stdio.h>
+
 /* Internals */
 
 static void processx__child_init(processx_handle_t *handle, int pipes[3][2],
@@ -55,7 +57,7 @@ void R_init_processx_unix() {
 /* LCOV_EXCL_START */
 
 void processx__write_int(int fd, int err) {
-  int dummy = write(fd, &err, sizeof(int));
+  ssize_t dummy = write(fd, &err, sizeof(int));
   (void) dummy;
 }
 
@@ -121,6 +123,11 @@ static void processx__child_init(processx_handle_t* handle, int pipes[3][2],
     if (-1 == close(i) && i > 200) break;
   }
 
+  if (options->wd != NULL && chdir(options->wd)) {
+    processx__write_int(error_fd, - errno);
+    raise(SIGKILL);
+  }
+
   execvp(command, args);
   processx__write_int(error_fd, - errno);
   raise(SIGKILL);
@@ -156,7 +163,7 @@ void processx__finalizer(SEXP status) {
     } while (wp == -1 && errno == EINTR);
 
     /* Maybe just waited on it? Then collect status */
-    if (wp == pid) processx__collect_exit_status(status, wstat);
+    if (wp == pid) processx__collect_exit_status(status, wp, wstat);
 
     /* If it is running, we need to kill it, and wait for the exit status */
     if (wp == 0) {
@@ -164,7 +171,7 @@ void processx__finalizer(SEXP status) {
       do {
 	wp = waitpid(pid, &wstat, 0);
       } while (wp == -1 && errno == EINTR);
-      processx__collect_exit_status(status, wstat);
+      processx__collect_exit_status(status, wp, wstat);
     }
   }
 
@@ -248,7 +255,7 @@ skip:
 SEXP processx_exec(SEXP command, SEXP args, SEXP std_out, SEXP std_err,
 		   SEXP windows_verbatim_args,
 		   SEXP windows_hide_window, SEXP private, SEXP cleanup,
-		   SEXP encoding) {
+		   SEXP wd, SEXP encoding) {
 
   char *ccommand = processx__tmp_string(command, 0);
   char **cargs = processx__tmp_character(args);
@@ -267,7 +274,11 @@ SEXP processx_exec(SEXP command, SEXP args, SEXP std_out, SEXP std_err,
   processx_handle_t *handle = NULL;
   SEXP result;
 
-  if (pipe(signal_pipe)) { goto cleanup; }
+  options.wd = isNull(wd) ? 0 : CHAR(STRING_ELT(wd, 0));
+
+  if (pipe(signal_pipe)) {
+    PROCESSX__ERROR("Cannot create pipe", strerror(errno));
+  }
   processx__cloexec_fcntl(signal_pipe[0], 1);
   processx__cloexec_fcntl(signal_pipe[1], 1);
 
@@ -290,7 +301,7 @@ SEXP processx_exec(SEXP command, SEXP args, SEXP std_out, SEXP std_err,
     if (signal_pipe[0] >= 0) close(signal_pipe[0]);
     if (signal_pipe[1] >= 0) close(signal_pipe[1]);
     processx__unblock_sigchld();
-    goto cleanup;
+    PROCESSX__ERROR("Cannot fork", strerror(err));
   }
 
   /* CHILD */
@@ -298,7 +309,7 @@ SEXP processx_exec(SEXP command, SEXP args, SEXP std_out, SEXP std_err,
     /* LCOV_EXCL_START */
     processx__child_init(handle, pipes, ccommand, cargs, signal_pipe[1],
 			 cstdout, cstderr, &options);
-    goto cleanup;
+    PROCESSX__ERROR("Cannot start child process", "");
     /* LCOV_EXCL_STOP */
   }
 
@@ -308,7 +319,7 @@ SEXP processx_exec(SEXP command, SEXP args, SEXP std_out, SEXP std_err,
     if (signal_pipe[0] >= 0) close(signal_pipe[0]);
     if (signal_pipe[1] >= 0) close(signal_pipe[1]);
     processx__unblock_sigchld();
-    goto cleanup;
+    PROCESSX__ERROR("Cannot create child process", "out of memory");
   }
 
   /* SIGCHLD can arrive now */
@@ -333,7 +344,7 @@ SEXP processx_exec(SEXP command, SEXP args, SEXP std_out, SEXP std_err,
     } while (err == -1 && errno == EINTR);
 
   } else {
-    goto cleanup;
+    PROCESSX__ERROR("Child process failed to start", strerror(exec_errorno));
   }
 
   if (signal_pipe[0] >= 0) close(signal_pipe[0]);
@@ -363,11 +374,11 @@ SEXP processx_exec(SEXP command, SEXP args, SEXP std_out, SEXP std_err,
     return result;
   }
 
- cleanup:
-  error("processx error");
+  error("processx error: '%s' at %s:%d", strerror(- exec_errorno),
+	__FILE__, __LINE__);
 }
 
-void processx__collect_exit_status(SEXP status, int wstat) {
+void processx__collect_exit_status(SEXP status, int retval, int wstat) {
   processx_handle_t *handle = R_ExternalPtrAddr(status);
 
   /* This must be called from a function that blocks SIGCHLD.
@@ -379,8 +390,11 @@ void processx__collect_exit_status(SEXP status, int wstat) {
 
   if (handle->collected) { return; }
 
-  /* We assume that errors were handled before */
-  if (WIFEXITED(wstat)) {
+  /* If waitpid returned -1, then an error happened, e.g. ECHILD, because
+     another SIGCHLD handler collected the exit status already. */
+  if (retval == -1) {
+    handle->exitcode = NA_INTEGER;
+  } else if (WIFEXITED(wstat)) {
     handle->exitcode = WEXITSTATUS(wstat);
   } else {
     handle->exitcode = - WTERMSIG(wstat);
@@ -466,9 +480,14 @@ SEXP processx_wait(SEXP status, SEXP timeout) {
     R_CheckUserInterrupt();
 
     /* We also check if the process is alive, because the SIGCHLD is
-       not delivered in valgrind :( */
+       not delivered in valgrind :( This also works around the issue
+       of SIGCHLD handler interference, i.e. if another package (like
+       parallel) removes our signal handler. */
     ret = kill(pid, 0);
-    if (ret != 0) return ScalarLogical(1);
+    if (ret != 0) {
+      ret = 1;
+      goto cleanup;
+    }
 
     if (ctimeout >= 0) timeleft -= PROCESSX_INTERRUPT_INTERVAL;
   }
@@ -484,6 +503,7 @@ SEXP processx_wait(SEXP status, SEXP timeout) {
     error("processx wait with timeout error: %s", strerror(errno));
   }
 
+ cleanup:
   if (handle->waitpipe[0] >= 0) close(handle->waitpipe[0]);
   if (handle->waitpipe[1] >= 0) close(handle->waitpipe[1]);
   handle->waitpipe[0] = -1;
@@ -527,6 +547,13 @@ SEXP processx_is_alive(SEXP status) {
     wp = waitpid(pid, &wstat, WNOHANG);
   } while (wp == -1 && errno == EINTR);
 
+  /* Maybe another SIGCHLD handler collected the exit status?
+     Then we just set it to NA (in the collect_exit_status call) */
+  if (wp == -1 && errno == ECHILD) {
+    processx__collect_exit_status(status, wp, wstat);
+    goto cleanup;
+  }
+
   /* Some other error? */
   if (wp == -1) {
     processx__unblock_sigchld();
@@ -537,7 +564,7 @@ SEXP processx_is_alive(SEXP status) {
   if (wp == 0) {
     ret = 1;
   } else {
-    processx__collect_exit_status(status, wstat);
+    processx__collect_exit_status(status, wp, wstat);
   }
 
  cleanup:
@@ -574,6 +601,14 @@ SEXP processx_get_exit_status(SEXP status) {
     wp = waitpid(pid, &wstat, WNOHANG);
   } while (wp == -1 && errno == EINTR);
 
+  /* Another SIGCHLD handler already collected the exit code?
+     Then we set it to NA (in the collect_exit_status call). */
+  if (wp == -1 && errno == ECHILD) {
+    processx__collect_exit_status(status, wp, wstat);
+    result = PROTECT(ScalarInteger(handle->exitcode));
+    goto cleanup;
+  }
+
   /* Some other error? */
   if (wp == -1) {
     processx__unblock_sigchld();
@@ -584,7 +619,7 @@ SEXP processx_get_exit_status(SEXP status) {
   if (wp == 0) {
     result = PROTECT(R_NilValue);
   } else {
-    processx__collect_exit_status(status, wstat);
+    processx__collect_exit_status(status, wp, wstat);
     result = PROTECT(ScalarInteger(handle->exitcode));
   }
 
@@ -642,9 +677,15 @@ SEXP processx_signal(SEXP status, SEXP signal) {
     wp = waitpid(pid, &wstat, WNOHANG);
   } while (wp == -1 && errno == EINTR);
 
+  /* Maybe another SIGCHLD handler collected it already? */
+  if (wp == -1 && errno == ECHILD) {
+    processx__collect_exit_status(status, wp, wstat);
+    goto cleanup;
+  }
+
   if (wp == -1) {
     processx__unblock_sigchld();
-    error("processx_get_exit_status: %s", strerror(errno));
+    error("processx_signal: %s", strerror(errno));
   }
 
  cleanup:
@@ -684,6 +725,13 @@ SEXP processx_kill(SEXP status, SEXP grace) {
     wp = waitpid(pid, &wstat, WNOHANG);
   } while (wp == -1 && errno == EINTR);
 
+  /* The child does not exist any more, set exit status to NA &
+     return FALSE. */
+  if (wp == -1 && errno == ECHILD) {
+    processx__collect_exit_status(status, wp, wstat);
+    goto cleanup;
+  }
+
   /* Some other error? */
   if (wp == -1) {
     processx__unblock_sigchld();
@@ -695,7 +743,7 @@ SEXP processx_kill(SEXP status, SEXP grace) {
 
   /* It is still running, so a SIGKILL */
   int ret = kill(-pid, SIGKILL);
-  if (ret == -1 && errno == ESRCH) { goto cleanup; }
+  if (ret == -1 && (errno == ESRCH || errno == EPERM)) { goto cleanup; }
   if (ret == -1) {
     processx__unblock_sigchld();
     error("process_kill: %s", strerror(errno));
@@ -708,8 +756,10 @@ SEXP processx_kill(SEXP status, SEXP grace) {
 
   /* Collect exit status, and check if it was killed by a SIGKILL
      If yes, this was most probably us (although we cannot be sure in
-     general... */
-  processx__collect_exit_status(status, wstat);
+     general...
+     If the status was collected by another SIGCHLD, then the exit
+     status will be set to NA */
+  processx__collect_exit_status(status, wp, wstat);
   result = handle->exitcode == - SIGKILL;
 
  cleanup:

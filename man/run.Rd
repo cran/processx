@@ -5,8 +5,8 @@
 \title{Run external command, and wait until finishes}
 \usage{
 run(command = NULL, args = character(), error_on_status = TRUE,
-  echo_cmd = FALSE, echo = FALSE, spinner = FALSE, timeout = Inf,
-  stdout_line_callback = NULL, stdout_callback = NULL,
+  wd = NULL, echo_cmd = FALSE, echo = FALSE, spinner = FALSE,
+  timeout = Inf, stdout_line_callback = NULL, stdout_callback = NULL,
   stderr_line_callback = NULL, stderr_callback = NULL,
   windows_verbatim_args = FALSE, windows_hide_window = FALSE,
   encoding = "")
@@ -24,6 +24,9 @@ with a non-zero status, or it is interrupted. The error clases are
 respectively, and both errors have class \code{system_command_error} as
 well.}
 
+\item{wd}{Working directory of the process. If \code{NULL}, the current
+working directory is used.}
+
 \item{echo_cmd}{Whether to print the command to run to the screen.}
 
 \item{echo}{Whether to print the standard output and error
@@ -31,7 +34,7 @@ to the screen. Note that the order of the standard output and error
 lines are not necessarily correct, as standard output is typically
 buffered.}
 
-\item{spinner}{Whether to show a reassusing spinner while the process
+\item{spinner}{Whether to show a reassuring spinner while the process
 is running.}
 
 \item{timeout}{Timeout for the process, in seconds, or as a \code{difftime}

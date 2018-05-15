@@ -30,12 +30,14 @@
 #'   `system_command_status_error` and `system_command_timeout_error`,
 #'   respectively, and both errors have class `system_command_error` as
 #'   well.
+#' @param wd Working directory of the process. If `NULL`, the current
+#'   working directory is used.
 #' @param echo_cmd Whether to print the command to run to the screen.
 #' @param echo Whether to print the standard output and error
 #'   to the screen. Note that the order of the standard output and error
 #'   lines are not necessarily correct, as standard output is typically
 #'   buffered.
-#' @param spinner Whether to show a reassusing spinner while the process
+#' @param spinner Whether to show a reassuring spinner while the process
 #'   is running.
 #' @param timeout Timeout for the process, in seconds, or as a `difftime`
 #'   object. If it is not finished before this, it will be killed.
@@ -90,8 +92,8 @@
 #' }
 
 run <- function(
-  command = NULL, args = character(),
-  error_on_status = TRUE, echo_cmd = FALSE, echo = FALSE, spinner = FALSE,
+  command = NULL, args = character(), error_on_status = TRUE, wd = NULL,
+  echo_cmd = FALSE, echo = FALSE, spinner = FALSE,
   timeout = Inf, stdout_line_callback = NULL, stdout_callback = NULL,
   stderr_line_callback = NULL, stderr_callback = NULL,
   windows_verbatim_args = FALSE, windows_hide_window = FALSE,
@@ -113,7 +115,7 @@ run <- function(
 
   ## Run the process
   pr <- process$new(
-    command, args, echo_cmd = echo_cmd,
+    command, args, echo_cmd = echo_cmd, wd = wd,
     windows_verbatim_args = windows_verbatim_args,
     windows_hide_window = windows_hide_window,
     stdout = "|", stderr = "|", encoding = encoding

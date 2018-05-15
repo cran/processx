@@ -6,6 +6,11 @@
 extern "C" {
 #endif
 
+#ifdef __INTEL_COMPILER
+#define _BSD_SOURCE 1
+#define _POSIX_C_SOURCE  200809L
+#endif
+
 #ifdef _WIN32
 #include <windows.h>
 #else
@@ -34,7 +39,7 @@ extern "C" {
 SEXP processx_exec(SEXP command, SEXP args, SEXP std_out, SEXP std_err,
 		   SEXP windows_verbatim_args,
 		   SEXP windows_hide_window, SEXP private_, SEXP cleanup,
-		   SEXP encoding);
+		   SEXP wd, SEXP encoding);
 SEXP processx_wait(SEXP status, SEXP timeout);
 SEXP processx_is_alive(SEXP status);
 SEXP processx_get_exit_status(SEXP status);
@@ -78,6 +83,7 @@ SEXP processx_write_named_pipe(SEXP pipe_ext, SEXP text);
 typedef struct {
   int windows_verbatim_args;
   int windows_hide;
+  const char *wd;
 } processx_options_t;
 
 #ifdef __cplusplus

@@ -37,6 +37,8 @@
 #define FDEV        0x40
 #define FTEXT       0x80
 
+HANDLE processx__default_iocp = NULL;
+
 static int processx__create_nul_handle(HANDLE *handle_ptr, DWORD access) {
   HANDLE handle;
   SECURITY_ATTRIBUTES sa;
@@ -91,7 +93,11 @@ static int processx__create_output_handle(HANDLE *handle_ptr, const char *file,
 }
 
 static void processx__unique_pipe_name(char* ptr, char* name, size_t size) {
-  snprintf(name, size, "\\\\?\\pipe\\px\\%p-%lu", ptr, GetCurrentProcessId());
+  int r;
+  GetRNGstate();
+  r = (int)(unif_rand() * 65000);
+  snprintf(name, size, "\\\\?\\pipe\\px\\%p-%lu", ptr + r, GetCurrentProcessId());
+  PutRNGstate();
 }
 
 int processx__create_pipe(void *id, HANDLE* parent_pipe_ptr, HANDLE* child_pipe_ptr) {
@@ -107,22 +113,29 @@ int processx__create_pipe(void *id, HANDLE* parent_pipe_ptr, HANDLE* child_pipe_
   sa.lpSecurityDescriptor = NULL;
   sa.bInheritHandle = TRUE;
 
-  processx__unique_pipe_name(id, pipe_name, sizeof(pipe_name));
+  for (;;) {
+    processx__unique_pipe_name(id, pipe_name, sizeof(pipe_name));
 
-  hOutputRead = CreateNamedPipeA(
-    pipe_name,
-    PIPE_ACCESS_OUTBOUND | PIPE_ACCESS_INBOUND |
-      FILE_FLAG_OVERLAPPED | FILE_FLAG_FIRST_PIPE_INSTANCE,
-    PIPE_TYPE_BYTE | PIPE_READMODE_BYTE | PIPE_WAIT,
-    1,
-    65536,
-    65536,
-    0,
-    NULL);
-  if (hOutputRead == INVALID_HANDLE_VALUE) {
+    hOutputRead = CreateNamedPipeA(
+      pipe_name,
+      PIPE_ACCESS_OUTBOUND | PIPE_ACCESS_INBOUND |
+        FILE_FLAG_OVERLAPPED | FILE_FLAG_FIRST_PIPE_INSTANCE,
+      PIPE_TYPE_BYTE | PIPE_READMODE_BYTE | PIPE_WAIT,
+      1,
+      65536,
+      65536,
+      0,
+      NULL);
+
+    if (hOutputRead != INVALID_HANDLE_VALUE) {
+      break;
+    }
+
     err = GetLastError();
-    errmessage = "creating read pipe";
-    goto error;
+    if (err != ERROR_PIPE_BUSY && err != ERROR_ACCESS_DENIED) {
+      errmessage = "creating read pipe";
+      goto error;
+    }
   }
 
   hOutputWrite = CreateFileA(
@@ -133,6 +146,7 @@ int processx__create_pipe(void *id, HANDLE* parent_pipe_ptr, HANDLE* child_pipe_
     OPEN_EXISTING,
     FILE_ATTRIBUTE_NORMAL,
     NULL);
+
   if (hOutputWrite == INVALID_HANDLE_VALUE) {
     err = GetLastError();
     errmessage = "creating write pipe";
@@ -150,8 +164,6 @@ int processx__create_pipe(void *id, HANDLE* parent_pipe_ptr, HANDLE* child_pipe_
   PROCESSX_ERROR(errmessage, err);
   return 0;			/* never reached */
 }
-
-
 
 processx_connection_t * processx__create_connection(
   HANDLE pipe_handle, const char *membername, SEXP private,
@@ -212,10 +224,8 @@ int processx__stdio_create(processx_handle_t *handle,
       /* piped output */
       processx_connection_t *con = 0;
       const char *r_pipe_name = i == 1 ? "stdout_pipe" : "stderr_pipe";
-      GetRNGstate();
-      err = processx__create_pipe(handle + (int)(unif_rand() * 65000),
-				  &pipe_handle[i], &CHILD_STDIO_HANDLE(buffer, i));
-      PutRNGstate();
+      err = processx__create_pipe(handle, &pipe_handle[i],
+				  &CHILD_STDIO_HANDLE(buffer, i));
       if (err) goto error;
       CHILD_STDIO_CRT_FLAGS(buffer, i) = FOPEN | FPIPE;
       con = processx__create_connection(pipe_handle[i], r_pipe_name,
