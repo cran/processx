@@ -1,4 +1,6 @@
 
+`%||%` <- function(l, r) if (is.null(l)) r else l
+
 os_type <- function() {
   .Platform$OS.type
 }
@@ -159,4 +161,49 @@ str_wrap_words <- function(words, width, indent = 0, exdent = 2) {
   if (!first_word) out <- c(out, current_line)
 
   out
+}
+
+set_names <- function(x, n) {
+  names(x) <- n
+  x
+}
+
+get_private <- function(x) {
+  x$.__enclos_env__$private
+}
+
+get_tool <- function(prog) {
+  if (os_type() == "windows") prog <- paste0(prog, ".exe")
+  exe <- system.file(package = "processx", "bin", .Platform$r_arch, prog)
+  if (exe == "") {
+    pkgpath <- system.file(package = "processx")
+    if (basename(pkgpath) == "inst") pkgpath <- dirname(pkgpath)
+    exe <- file.path(pkgpath, "src", "tools", prog)
+    if (!file.exists(exe)) return("")
+  }
+  exe
+}
+
+get_id <- function() {
+  paste0(
+    "PS",
+    paste(sample(c(LETTERS, 0:9), 10, replace = TRUE), collapse = ""),
+    "_", as.integer(Internal(Sys.time()))
+  )
+}
+
+format_unix_time <- function(z) {
+  structure(z, class = c("POSIXct", "POSIXt"), tzone = "GMT")
+}
+
+file_size <- function(x) {
+  if (getRversion() >= "3.2.0") {
+    file.info(x, extra_cols = FALSE)$size
+  } else {
+    file.info(x)$size
+  }
+}
+
+disable_crash_dialog <- function() {
+  .Call(c_processx_disable_crash_dialog)
 }

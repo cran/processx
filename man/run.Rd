@@ -7,16 +7,14 @@
 run(command = NULL, args = character(), error_on_status = TRUE,
   wd = NULL, echo_cmd = FALSE, echo = FALSE, spinner = FALSE,
   timeout = Inf, stdout_line_callback = NULL, stdout_callback = NULL,
-  stderr_line_callback = NULL, stderr_callback = NULL,
+  stderr_line_callback = NULL, stderr_callback = NULL, env = NULL,
   windows_verbatim_args = FALSE, windows_hide_window = FALSE,
-  encoding = "")
+  encoding = "", cleanup_tree = FALSE)
 }
 \arguments{
-\item{command}{Character scalar, the command to run. It will be
-escaped via \link[base:shQuote]{base::shQuote}.}
+\item{command}{Character scalar, the command to run.}
 
-\item{args}{Character vector, arguments to the command. They will be
-escaped via \link[base:shQuote]{base::shQuote}.}
+\item{args}{Character vector, arguments to the command.}
 
 \item{error_on_status}{Whether to throw an error if the command returns
 with a non-zero status, or it is interrupted. The error clases are
@@ -58,6 +56,9 @@ of the standard error. A chunk can be as small as a single character.
 At most one of \code{stderr_line_callback} and \code{stderr_callback} can be
 non-\code{NULL}.}
 
+\item{env}{Environment of the child process, a named character vector.
+IF \code{NULL}, the environment of the parent is inherited.}
+
 \item{windows_verbatim_args}{Whether to omit the escaping of the
 command and the arguments on windows. Ignored on other platforms.}
 
@@ -68,6 +69,9 @@ application on windows. Ignored on other platforms.}
 \code{stderr}. By default the encoding of the current locale is
 used. Note that \code{processx} always reencodes the output of
 both streams in UTF-8 currently.}
+
+\item{cleanup_tree}{Whether to clean up the child process tree after
+the process has finished.}
 }
 \value{
 A list with components:

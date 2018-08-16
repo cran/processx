@@ -7,10 +7,13 @@
 
 /* Internals */
 
-static void processx__child_init(processx_handle_t *handle, int pipes[3][2],
-				 char *command, char **args, int error_fd,
-				 const char *std_out, const char *std_err,
-				 processx_options_t *options);
+static void processx__child_init(processx_handle_t *handle, int (*pipes)[2],
+				 int stdio_count, char *command, char **args,
+				 int error_fd, const char *std_in,
+				 const char *std_out,
+				 const char *std_err, char **env,
+				 processx_options_t *options,
+				 const char *tree_id);
 
 static SEXP processx__make_handle(SEXP private, int cleanup);
 static void processx__handle_destroy(processx_handle_t *handle);
@@ -32,6 +35,13 @@ void processx__create_connections(processx_handle_t *handle, SEXP private,
 #endif
 #endif
 
+#if defined(__APPLE__) && !TARGET_OS_IPHONE
+# include <crt_externs.h>
+# define environ (*_NSGetEnviron())
+#else
+extern char **environ;
+#endif
+
 extern processx__child_list_t child_list_head;
 extern processx__child_list_t *child_list;
 extern processx__child_list_t child_free_list_head;
@@ -43,12 +53,12 @@ extern processx__child_list_t *child_free_list;
 
 void R_init_processx_unix() {
   child_list_head.pid = 0;
-  child_list_head.status = 0;
+  child_list_head.weak_status = R_NilValue;
   child_list_head.next = 0;
   child_list = &child_list_head;
 
   child_free_list_head.pid = 0;
-  child_free_list_head.status = 0;
+  child_free_list_head.weak_status = R_NilValue;
   child_free_list_head.next = 0;
   child_free_list = &child_free_list_head;
 }
@@ -61,62 +71,77 @@ void processx__write_int(int fd, int err) {
   (void) dummy;
 }
 
-static void processx__child_init(processx_handle_t* handle, int pipes[3][2],
-				 char *command, char **args, int error_fd,
-				 const char *std_out, const char *std_err,
-				 processx_options_t *options) {
+static void processx__child_init(processx_handle_t* handle, int (*pipes)[2],
+				 int stdio_count, char *command, char **args,
+				 int error_fd, const char *std_in,
+				 const char *std_out,
+				 const char *std_err, char **env,
+				 processx_options_t *options,
+				 const char *tree_id) {
 
-  int fd0, fd1, fd2;
-  int i;
+  int close_fd, use_fd, fd, i;
+  const char *out_files[3] = { std_in, std_out, std_err };
 
   setsid();
 
   /* The dup2 calls make sure that stdin, stdout and stderr use file
-     descriptors 0, 1 and 3 respectively. */
+     descriptors 0, 1 and 2 respectively. */
 
-  /* stdin is coming from /dev/null */
-
-  fd0 = open("/dev/null", O_RDONLY);
-  if (fd0 == -1) { processx__write_int(error_fd, - errno); raise(SIGKILL); }
-
-  if (fd0 != 0) fd0 = dup2(fd0, 0);
-  if (fd0 == -1) { processx__write_int(error_fd, - errno); raise(SIGKILL); }
-
-  /* stdout is going into file or a pipe */
-
-  if (!std_out) {
-    fd1 = open("/dev/null", O_RDWR);
-  } else if (!strcmp(std_out, "|")) {
-    fd1 = pipes[1][1];
-    close(pipes[1][0]);
-  } else {
-    fd1 = open(std_out, O_CREAT | O_TRUNC| O_RDWR, 0644);
+  for (fd = 0; fd < stdio_count; fd++) {
+    use_fd = pipes[fd][1];
+    if (use_fd < 0 || use_fd >= fd) continue;
+    pipes[fd][1] = fcntl(use_fd, F_DUPFD, stdio_count);
+    if (pipes[fd][1] == -1) {
+      processx__write_int(error_fd, -errno);
+      raise(SIGKILL);
+    }
   }
-  if (fd1 == -1) { processx__write_int(error_fd, - errno); raise(SIGKILL); }
 
-  if (fd1 != 1) fd1 = dup2(fd1, 1);
-  if (fd1 == -1) { processx__write_int(error_fd, - errno); raise(SIGKILL); }
+  for (fd = 0; fd < stdio_count; fd++) {
+    close_fd = pipes[fd][0];
+    use_fd = pipes[fd][1];
 
-  /* stderr, to file or a pipe */
+    if (use_fd < 0) {
+      if (fd >= 3) continue;
+      if (out_files[fd]) {
+	if (fd == 0) {
+	  use_fd = open(out_files[fd], O_RDONLY);
+	} else {
+	  use_fd = open(out_files[fd], O_CREAT | O_TRUNC| O_RDWR, 0644);
+	}
+      } else {
+	use_fd = open("/dev/null", fd == 0 ? O_RDONLY : O_RDWR);
+      }
+      close_fd = use_fd;
 
-  if (!std_err) {
-    fd2 = open("/dev/null", O_RDWR);
-  } else if (!strcmp(std_err, "|")) {
-    fd2 = pipes[2][1];
-    close(pipes[2][0]);
-  } else {
-    fd2 = open(std_err, O_CREAT | O_TRUNC| O_RDWR, 0644);
+      if (use_fd == -1) {
+	processx__write_int(error_fd, -errno);
+	raise(SIGKILL);
+      }
+    }
+
+    if (fd == use_fd) {
+      processx__cloexec_fcntl(use_fd, 0);
+    } else {
+      fd = dup2(use_fd, fd);
+    }
+
+    if (fd == -1) {
+      processx__write_int(error_fd, -errno);
+      raise(SIGKILL);
+    }
+
+    if (fd <= 2) processx__nonblock_fcntl(fd, 0);
+
+    if (close_fd >= stdio_count) close(close_fd);
   }
-  if (fd2 == -1) { processx__write_int(error_fd, - errno); raise(SIGKILL); }
 
-  if (fd2 != 2) fd2 = dup2(fd2, 2);
-  if (fd2 == -1) { processx__write_int(error_fd, - errno); raise(SIGKILL); }
+  for (fd = 0; fd < stdio_count; fd++) {
+    use_fd = pipes[fd][1];
+    if (use_fd >= stdio_count) close(use_fd);
+  }
 
-  processx__nonblock_fcntl(fd0, 0);
-  processx__nonblock_fcntl(fd1, 0);
-  processx__nonblock_fcntl(fd2, 0);
-
-  for (i = 3; i < error_fd; i++) {
+  for (i = stdio_count; i < error_fd; i++) {
     close(i);
   }
   for (i = error_fd + 1; ; i++) {
@@ -128,6 +153,13 @@ static void processx__child_init(processx_handle_t* handle, int pipes[3][2],
     raise(SIGKILL);
   }
 
+  if (env) environ = env;
+
+  if (putenv(strdup(tree_id))) {
+    processx__write_int(error_fd, - errno);
+    raise(SIGKILL);
+  }
+
   execvp(command, args);
   processx__write_int(error_fd, - errno);
   raise(SIGKILL);
@@ -135,16 +167,10 @@ static void processx__child_init(processx_handle_t* handle, int pipes[3][2],
 
 /* LCOV_EXCL_STOP */
 
-SEXP processx__disconnect_process_handle(SEXP status) {
-  R_SetExternalPtrTag(status, R_NilValue);
-  return R_NilValue;
-}
-
 void processx__finalizer(SEXP status) {
   processx_handle_t *handle = (processx_handle_t*) R_ExternalPtrAddr(status);
   pid_t pid;
   int wp, wstat;
-  SEXP private;
 
   processx__block_sigchld();
 
@@ -174,21 +200,6 @@ void processx__finalizer(SEXP status) {
       processx__collect_exit_status(status, wp, wstat);
     }
   }
-
-  /* Copy over pid and exit status */
-  private = PROTECT(R_ExternalPtrTag(status));
-  if (!isNull(private)) {
-    SEXP sone = PROTECT(ScalarLogical(1));
-    SEXP spid = PROTECT(ScalarInteger(pid));
-    SEXP sexitcode = PROTECT(ScalarInteger(handle->exitcode));
-
-    defineVar(install("exited"), sone, private);
-    defineVar(install("pid"), spid, private);
-    defineVar(install("exitcode"), sexitcode, private);
-    UNPROTECT(3);
-  }
-
-  UNPROTECT(1);
 
   /* Note: if no cleanup is requested, then we still have a sigchld
      handler, to read out the exit code via waitpid, but no handle
@@ -252,27 +263,36 @@ skip:
   processx__cloexec_fcntl(pipe[1], 1);
 }
 
-SEXP processx_exec(SEXP command, SEXP args, SEXP std_out, SEXP std_err,
-		   SEXP windows_verbatim_args,
-		   SEXP windows_hide_window, SEXP private, SEXP cleanup,
-		   SEXP wd, SEXP encoding) {
+SEXP processx_exec(SEXP command, SEXP args, SEXP std_in, SEXP std_out,
+		   SEXP std_err, SEXP connections, SEXP env,
+		   SEXP windows_verbatim_args, SEXP windows_hide_window,
+		   SEXP private, SEXP cleanup,  SEXP wd, SEXP encoding,
+		   SEXP tree_id) {
 
   char *ccommand = processx__tmp_string(command, 0);
   char **cargs = processx__tmp_character(args);
+  char **cenv = isNull(env) ? 0 : processx__tmp_character(env);
   int ccleanup = INTEGER(cleanup)[0];
+  const char *cstdin = isNull(std_in) ? 0 : CHAR(STRING_ELT(std_in, 0));
   const char *cstdout = isNull(std_out) ? 0 : CHAR(STRING_ELT(std_out, 0));
   const char *cstderr = isNull(std_err) ? 0 : CHAR(STRING_ELT(std_err, 0));
   const char *cencoding = CHAR(STRING_ELT(encoding, 0));
+  const char *ctree_id = CHAR(STRING_ELT(tree_id, 0));
   processx_options_t options = { 0 };
+  int num_connections = LENGTH(connections) + 3;
 
   pid_t pid;
   int err, exec_errorno = 0, status;
   ssize_t r;
   int signal_pipe[2] = { -1, -1 };
-  int pipes[3][2] = { { -1, -1 }, { -1, -1 }, { -1, -1 } };
+  int (*pipes)[2];
+  int i;
 
   processx_handle_t *handle = NULL;
   SEXP result;
+
+  pipes = (int(*)[2]) R_alloc(num_connections, sizeof(int) * 2);
+  for (i = 0; i < num_connections; i++) pipes[i][0] = pipes[i][1] = -1;
 
   options.wd = isNull(wd) ? 0 : CHAR(STRING_ELT(wd, 0));
 
@@ -287,9 +307,18 @@ SEXP processx_exec(SEXP command, SEXP args, SEXP std_out, SEXP std_err,
   result = PROTECT(processx__make_handle(private, ccleanup));
   handle = R_ExternalPtrAddr(result);
 
-  /* Create pipes, if requested. TODO: stdin */
+  /* Create pipes, if requested. */
+  if (cstdin && !strcmp(cstdin, "|")) processx__make_socketpair(pipes[0]);
   if (cstdout && !strcmp(cstdout, "|")) processx__make_socketpair(pipes[1]);
   if (cstderr && !strcmp(cstderr, "|")) processx__make_socketpair(pipes[2]);
+
+  for (i = 0; i < num_connections - 3; i++) {
+    processx_connection_t *ccon =
+      R_ExternalPtrAddr(VECTOR_ELT(connections, i));
+    int fd = processx_c_connection_fileno(ccon);
+    processx__nonblock_fcntl(fd, 0);
+    pipes[i + 3][1] = fd;
+  }
 
   processx__block_sigchld();
 
@@ -307,11 +336,16 @@ SEXP processx_exec(SEXP command, SEXP args, SEXP std_out, SEXP std_err,
   /* CHILD */
   if (pid == 0) {
     /* LCOV_EXCL_START */
-    processx__child_init(handle, pipes, ccommand, cargs, signal_pipe[1],
-			 cstdout, cstderr, &options);
+    processx__child_init(handle, pipes, num_connections, ccommand, cargs,
+			 signal_pipe[1], cstdin, cstdout, cstderr, cenv,
+			 &options, ctree_id);
     PROCESSX__ERROR("Cannot start child process", "");
     /* LCOV_EXCL_STOP */
   }
+
+  /* Query creation time ASAP. We'll use (pid, create_time) as an ID,
+     to avoid race conditions when sending signals */
+  handle->create_time = processx__create_time(pid);
 
   /* We need to know the processx children */
   if (processx__child_add(pid, result)) {
@@ -350,8 +384,11 @@ SEXP processx_exec(SEXP command, SEXP args, SEXP std_out, SEXP std_err,
   if (signal_pipe[0] >= 0) close(signal_pipe[0]);
 
   /* Set fds for standard I/O */
-  /* TODO: implement stdin */
   handle->fd0 = handle->fd1 = handle->fd2 = -1;
+  if (pipes[0][0] >= 0) {
+    handle->fd0  = pipes[0][0];
+    processx__nonblock_fcntl(handle->fd0, 1);
+  }
   if (pipes[1][0] >= 0) {
     handle->fd1 = pipes[1][0];
     processx__nonblock_fcntl(handle->fd1, 1);
@@ -362,8 +399,16 @@ SEXP processx_exec(SEXP command, SEXP args, SEXP std_out, SEXP std_err,
   }
 
   /* Closed unused ends of pipes */
-  if (pipes[1][1] >= 0) close(pipes[1][1]);
-  if (pipes[2][1] >= 0) close(pipes[2][1]);
+  for (i = 0; i < 3; i++) {
+    if (pipes[i][1] >= 0) close(pipes[i][1]);
+  }
+
+  /* Close connections passed to the child process */
+  for (i = 3; i < num_connections; i++) {
+    processx_connection_t *ccon =
+      R_ExternalPtrAddr(VECTOR_ELT(connections, i - 3));
+    processx_c_connection_close(ccon);
+  }
 
   /* Create proper connections */
   processx__create_connections(handle, private, cencoding);
@@ -507,6 +552,7 @@ SEXP processx_wait(SEXP status, SEXP timeout) {
   if (handle->waitpipe[0] >= 0) close(handle->waitpipe[0]);
   if (handle->waitpipe[1] >= 0) close(handle->waitpipe[1]);
   handle->waitpipe[0] = -1;
+  handle->waitpipe[1] = -1;
 
   return ScalarLogical(ret != 0);
 }
@@ -691,6 +737,10 @@ SEXP processx_signal(SEXP status, SEXP signal) {
  cleanup:
   processx__unblock_sigchld();
   return ScalarLogical(result);
+}
+
+SEXP processx_interrupt(SEXP status) {
+  return processx_signal(status, ScalarInteger(2));
 }
 
 /* This is a special case of `processx_signal`, and we implement it almost

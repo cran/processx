@@ -20,6 +20,8 @@
 /* Data types                                                            */
 /* --------------------------------------------------------------------- */
 
+#define ARRAY_SIZE(a) (sizeof(a) / sizeof((a)[0]))
+
 #ifdef _WIN32
 typedef HANDLE processx_file_handle_t;
 typedef struct {
@@ -46,6 +48,7 @@ typedef struct processx_connection_s {
   int is_closed_;
   int is_eof_;			/* the UTF8 buffer */
   int is_eof_raw_;		/* the raw file */
+  int close_on_destroy;
 
   char *encoding;
   void *iconv_ctx;
@@ -111,11 +114,20 @@ typedef struct processx_pollable_s {
 /* Create connection from fd / HANDLE */
 SEXP processx_connection_create(SEXP handle, SEXP encoding);
 
+/* Create from fd, this is only different on Windows */
+SEXP processx_connection_create_fd(SEXP handle, SEXP encoding, SEXP close);
+
+/* Create file connection */
+SEXP processx_connection_create_file(SEXP filename, SEXP read, SEXP write);
+
 /* Read characters in a given encoding from the connection. */
 SEXP processx_connection_read_chars(SEXP con, SEXP nchars);
 
 /* Read lines of characters from the connection. */
 SEXP processx_connection_read_lines(SEXP con, SEXP nlines);
+
+/* Write characters */
+SEXP processx_connection_write_bytes(SEXP con, SEXP chars);
 
 /* Check if the connection has ended. */
 SEXP processx_connection_is_eof(SEXP con);
@@ -126,6 +138,17 @@ SEXP processx_is_closed(SEXP con);
 
 /* Poll connections and other pollable handles */
 SEXP processx_connection_poll(SEXP pollables, SEXP timeout);
+
+/* Functions for connection inheritance */
+SEXP processx_connection_create_pipepair();
+
+SEXP processx_connection_set_stdout(SEXP con, SEXP drop);
+
+SEXP processx_connection_set_stderr(SEXP con, SEXP drop);
+
+SEXP processx_connection_get_fileno(SEXP con);
+
+SEXP processx_connection_disable_inheritance();
 
 /* --------------------------------------------------------------------- */
 /* API from C                                                            */
@@ -153,6 +176,12 @@ ssize_t processx_c_connection_read_line(
   char **linep,
   size_t *linecapp);
 
+/* Write characters */
+ssize_t processx_c_connection_write_bytes(
+  processx_connection_t *con,
+  const void *buffer,
+  size_t nbytes);
+
 /* Check if the connection has ended */
 int processx_c_connection_is_eof(
   processx_connection_t *con);
@@ -172,6 +201,9 @@ int processx_c_connection_poll(
 int processx_c_pollable_from_connection(
   processx_pollable_t *pollable,
   processx_connection_t *ccon);
+
+processx_file_handle_t processx_c_connection_fileno(
+  const processx_connection_t *con);
 
 /* --------------------------------------------------------------------- */
 /* Internals                                                             */

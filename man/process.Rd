@@ -12,7 +12,9 @@ streams. The process id is then used to manage the process.
 }
 \section{Usage}{
 \preformatted{p <- process$new(command = NULL, args,
-                 stdout = NULL, stderr = NULL, cleanup = TRUE,
+                 stdin = NULL, stdout = NULL, stderr = NULL,
+                 connections = list(), poll_connection = NULL,
+                 env = NULL, cleanup = TRUE, cleanup_tree = FALSE,
                  wd = NULL, echo_cmd = FALSE, supervise = FALSE,
                  windows_verbatim_args = FALSE,
                  windows_hide_window = FALSE,
@@ -20,30 +22,54 @@ streams. The process id is then used to manage the process.
 
 p$is_alive()
 p$signal(signal)
+p$interrupt()
 p$kill(grace = 0.1)
+p$kill_tree(grace = 0.1)
 p$wait(timeout = -1)
 p$get_pid()
 p$get_exit_status()
-p$restart()
 p$get_start_time()
 
 p$read_output(n = -1)
 p$read_error(n = -1)
 p$read_output_lines(n = -1)
 p$read_error_lines(n = -1)
+p$has_input_connection()
+p$has_output_connection()
+p$has_error_connection()
+p$has_poll_connection()
+p$get_input_connection()
 p$get_output_connection()
 p$get_error_connection()
+p$get_poll_connection()
 p$is_incomplete_output()
 p$is_incomplete_error()
 p$read_all_output()
 p$read_all_error()
 p$read_all_output_lines()
 p$read_all_error_lines()
+p$write_input(str, sep = "\n")
+p$get_input_file()
+p$get_output_file()
+p$get_error_file()
 
 p$poll_io(timeout)
 
 p$get_result()
 
+p$as_ps_handle()
+p$get_name()
+p$get_exe()
+p$get_cmdline()
+p$get_status()
+p$get_username()
+p$get_wd()
+p$get_cpu_times()
+p$get_memory_info()
+p$suspend()
+p$resume()
+
+format(p)
 print(p)
 }
 }
@@ -59,14 +85,37 @@ It should not be quoted with \code{\link[base:shQuote]{base::shQuote()}}. See
 \code{\link[base:normalizePath]{base::normalizePath()}} for tilde-expansion.
 \item \code{args}: Character vector, arguments to the command. They will be
 used as is, without a shell. They don't need to be escaped.
+\item \code{stdin}: What to do with the standard input. Possible values:
+\code{NULL}: set to the \emph{null device}, i.e. no standard input is
+provided; a string, supply the specified string as standard input;
+\code{"|"}: create a (writeable) connection for stdin.
 \item \code{stdout}: What to do with the standard output. Possible values:
 \code{NULL}: discard it; a string, redirect it to this file;
 \code{"|"}: create a connection for it.
 \item \code{stderr}: What to do with the standard error. Possible values:
 \code{NULL}: discard it; a string, redirect it to this file;
 \code{"|"}: create a connection for it.
-\item \code{cleanup}: Whether to kill the process (and its children)
-if the \code{process} object is garbage collected.
+\item \code{connections}: A list of connections to pass to the child process.
+This is an experimental feature currently.
+\item \code{poll_connection}: Whether to create an extra connection to the process
+that allows polling, even if the standard input and standard output
+are not pipes. If this is \code{NULL} (the default), then this connection
+will be only created if standard output and standard error are not
+pipes, and \code{connections} is an empty list. If the poll connection is
+created, you can query it via \code{p$get_poll_connection()} and it is
+also included in the response to \code{p$poll_io()} and \code{\link[=poll]{poll()}}. The
+numeric file descriptor of the poll connection comes right after
+\code{stderr} (2), and the connections listed in \code{connections}.
+\item \code{env}: Environment variables of the child process. If \code{NULL}, the
+parent's environment is inherited. On Windows, many programs cannot
+function correctly if some environment variables are not set, so we
+always set \code{HOMEDRIVE}, \code{HOMEPATH}, \code{LOGONSERVER}, \code{PATH},
+\code{SYSTEMDRIVE}, \code{SYSTEMROOT}, \code{TEMP}, \code{USERDOMAIN}, \code{USERNAME},
+\code{USERPROFILE} and \code{WINDIR}.
+\item \code{cleanup}: Whether to kill the process when the \code{process} object is
+garbage collected.
+\item \code{cleanup_tree}: Whether to kill the process and its child process tree
+when the \code{process} object is garbage collected.
 \item \code{wd}: working directory of the process. It must exist. If \code{NULL}, then
 the current working directory is used.
 \item \code{echo_cmd}: Whether to print the command to the screen before
@@ -84,12 +133,17 @@ the process. See \code{\link[tools:pskill]{tools::pskill()}} for the list of sig
 \item \code{timeout}: Timeout in milliseconds, for the wait or the I/O
 polling.
 \item \code{n}: Number of characters or lines to read.
-\item \code{encoding}: The encoding to assume for \code{stdout} and
+\item \code{str}: Character or raw vector to write to the standard input of the
+process. If a character vector with a marked encoding, it will be
+converted to \code{encoding}.
+\item \code{sep}: Separator to add between \code{str} elements if it is a character
+vector. It is ignored if \code{str} is a raw vector.
+\item \code{encoding}: The encoding to assume for \code{stdin}, \code{stdout} and
 \code{stderr}. By default the encoding of the current locale is
-used. Note that \code{processx} always reencodes the output of
-both streams in UTF-8 currently. If you want to read them
-without any conversion, on all platforms, specify \code{"UTF-8"} as
-encoding.
+used. Note that \code{processx} always reencodes the output of the
+\code{stdout}and \code{stderr}  streams in UTF-8 currently.
+If you want to read them without any conversion, on all platforms,
+specify \code{"UTF-8"} as encoding.
 \item \code{post_process}: An optional function to run when the process has
 finished. Currently it only runs if \code{$get_result()} is called.
 It is only run once.
@@ -111,11 +165,28 @@ signal return \code{TRUE} if the process is alive, and \code{FALSE}
 otherwise. On Unix all signals are supported that the OS supports, and
 the 0 signal as well.
 
+\code{$interrupt()} sends an interrupt to the process. On Unix this is a
+\code{SIGINT} signal, and it is usually equivalent to pressing CTRL+C at the
+terminal prompt. On Windows, it is a CTRL+BREAK keypress. Applications
+may catch these events. By default they will quit.
+
 \code{$kill()} kills the process. It also kills all of its child
 processes, except if they have created a new process group (on Unix),
 or job object (on Windows). It returns \code{TRUE} if the process
 was killed, and \code{FALSE} if it was no killed (because it was
 already finished/dead when \code{processx} tried to kill it).
+
+\code{$kill_tree()} performs process tree cleanup, it kills the process
+(if still alive), together with any child (or grandchild, etc.)
+processes. It uses the \emph{ps} package, so that needs to be installed,
+and \emph{ps} needs to support the current platform as well. Process tree
+cleanup works by marking the process with an environment variable,
+which is inherited in all child processes. This allows finding
+descendents, even if they are orphaned, i.e. they are not connected
+to the root of the tree cleanup in the process tree any more.
+\code{$kill_tree()} returns a named integer vector of the process ids that
+were killed, the names are the names of the processes (e.g. \code{"sleep"},
+\code{"notepad.exe"}, \code{"Rterm.exe"}, etc.).
 
 \code{$wait()} waits until the process finishes, or a timeout happens.
 Note that if the process never finishes, and the timeout is infinite
@@ -136,8 +207,6 @@ has started. In these cases processx cannot determine the real exit
 status of the process. One such package is parallel, if used with
 fork clusters, e.g. through the \code{parallel::mcparallel()} function.
 
-\code{$restart()} restarts a process. It returns the process itself.
-
 \code{$get_start_time()} returns the time when the process was
 started.
 
@@ -147,7 +216,7 @@ supervisor process.
 \code{$supervise()} if passed \code{TRUE}, tells the supervisor to start
 tracking the process. If \code{FALSE}, tells the supervisor to stop
 tracking the process. Note that even if the supervisor is disabled for a
-process, if it was started with \code{cleanup=TRUE}, the process will
+process, if it was started with \code{cleanup = TRUE}, the process will
 still be killed when the object is garbage collected.
 
 \code{$read_output()} reads from the standard output connection of the
@@ -168,6 +237,10 @@ error.
 \code{$read_error_lines()} is similar to \code{$read_output_lines}, but
 it reads from the standard error stream.
 
+\code{$has_input_connection()} return \code{TRUE} if there is a connection
+object for standard input; in other words, if \code{stdout="|"}. It returns
+\code{FALSE} otherwise.
+
 \code{$has_output_connection()} returns \code{TRUE} if there is a connection
 object for standard output; in other words, if \code{stdout="|"}. It returns
 \code{FALSE} otherwise.
@@ -176,11 +249,20 @@ object for standard output; in other words, if \code{stdout="|"}. It returns
 object for standard error; in other words, if \code{stderr="|"}. It returns
 \code{FALSE} otherwise.
 
+\code{$has_poll_connection()} return \code{TRUE} if there is a poll connection,
+\code{FALSE} otherwise.
+
+\code{$get_input_connection()} returns a connection object, to the
+standard input stream of the process.
+
 \code{$get_output_connection()} returns a connection object, to the
 standard output stream of the process.
 
 \code{$get_error_conneciton()} returns a connection object, to the
 standard error stream of the process.
+
+\code{$get_poll_connetion()} returns the poll connection, if the process has
+one.
 
 \code{$is_incomplete_output()} return \code{FALSE} if the other end of
 the standard output connection was closed (most probably because the
@@ -218,6 +300,19 @@ polling for I/O and potentically several \code{readLines()} calls.
 It returns a character vector. This will return content only if
 \code{stderr="|"} was used. Otherwise, it will throw an error.
 
+\code{$write_input()} writes the character vector (separated by \code{sep}) to
+the standard input of the process. It will be converted to the specified
+encoding. This operation is non-blocking, and it will return, even if
+the write fails (because the write buffer is full), or if it suceeds
+partially (i.e. not the full string is written). It returns with a raw
+vector, that contains the bytes that were not written. You can supply
+this raw vector to \code{$write_input()} again, until it is fully written,
+and then the return value will be \code{raw(0)} (invisibly).
+
+\code{$get_input_file()} if the \code{stdin} argument was a filename,
+this returns the absolute path to the file. If \code{stdin} was \code{"|"} or
+\code{NULL}, this simply returns that value.
+
 \code{$get_output_file()} if the \code{stdout} argument was a filename,
 this returns the absolute path to the file. If \code{stdout} was \code{"|"} or
 \code{NULL}, this simply returns that value.
@@ -233,6 +328,27 @@ to poll on multiple processes.
 \code{$get_result()} returns the result of the post processesing function.
 It can only be called once the process has finished. If the process has
 no post-processing function, then \code{NULL} is returned.
+
+\code{$as_ps_handle()} returns a \link[ps:ps_handle]{ps::ps_handle} object, corresponding to
+the process. The following methods use the ps package on a \code{ps_handle}
+object, created automatically:
+\itemize{
+\item \code{p$get_name()} calls \code{\link[ps:ps_name]{ps::ps_name()}} to get the process name.
+\item \code{p$get_exe()} calls \code{\link[ps:ps_exe]{ps::ps_exe()}} to get the path of the executable.
+\item \code{p$get_cmdline()} calls \code{\link[ps:ps_cmdline]{ps::ps_cmdline()}} to get the command line.
+\item \code{p$get_status()} calls \code{\link[ps:ps_status]{ps::ps_status()}} to get the process status.
+\item \code{p$get_username()} calls \code{\link[ps:ps_username]{ps::ps_username()}} to get the username.
+\item \code{p$get_wd()} calls \code{\link[ps:ps_cwd]{ps::ps_cwd()}} to get the current working
+directory.
+\item \code{p$get_cpu_times()} calls \code{\link[ps:ps_cpu_times]{ps::ps_cpu_times()}} to get CPU usage data.
+\item \code{p$get_memory_info()} calls \code{\link[ps:ps_memory_info]{ps::ps_memory_info()}} to get memory usage
+data.
+\item \code{p$suspend()} calls \code{\link[ps:ps_suspend]{ps::ps_suspend()}} to suspend the process.
+\item \code{p$resume()} calls \code{\link[ps:ps_resume]{ps::ps_resume()}} to resume a suspended process.
+}
+
+\code{format(p)} or \code{p$format()} creates a string representation of the
+process, usually for printing.
 
 \code{print(p)} or \code{p$print()} shows some information about the
 process on the screen, whether it is running and it's process id, etc.
@@ -259,7 +375,7 @@ p
 p$kill()
 p$is_alive()
 
-p$restart()
+p <- process$new("sleep", "2")
 p$is_alive()
 Sys.sleep(3)
 p$is_alive()

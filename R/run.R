@@ -21,10 +21,8 @@
 #' `$kill()` on it to terminate it, as a response to a message on the
 #' standard output or error.
 #'
-#' @param command Character scalar, the command to run. It will be
-#'   escaped via [base::shQuote].
-#' @param args Character vector, arguments to the command. They will be
-#'   escaped via [base::shQuote].
+#' @param command Character scalar, the command to run.
+#' @param args Character vector, arguments to the command.
 #' @param error_on_status Whether to throw an error if the command returns
 #'   with a non-zero status, or it is interrupted. The error clases are
 #'   `system_command_status_error` and `system_command_timeout_error`,
@@ -55,6 +53,8 @@
 #'   of the standard error. A chunk can be as small as a single character.
 #'   At most one of `stderr_line_callback` and `stderr_callback` can be
 #'   non-`NULL`.
+#' @param env Environment of the child process, a named character vector.
+#'   IF `NULL`, the environment of the parent is inherited.
 #' @param windows_verbatim_args Whether to omit the escaping of the
 #'   command and the arguments on windows. Ignored on other platforms.
 #' @param windows_hide_window Whether to hide the window of the
@@ -63,6 +63,8 @@
 #'   `stderr`. By default the encoding of the current locale is
 #'   used. Note that `processx` always reencodes the output of
 #'   both streams in UTF-8 currently.
+#' @param cleanup_tree Whether to clean up the child process tree after
+#'   the process has finished.
 #' @return A list with components:
 #'   * status The exit status of the process. If this is `NA`, then the
 #'     process was killed and had no exit status.
@@ -95,9 +97,9 @@ run <- function(
   command = NULL, args = character(), error_on_status = TRUE, wd = NULL,
   echo_cmd = FALSE, echo = FALSE, spinner = FALSE,
   timeout = Inf, stdout_line_callback = NULL, stdout_callback = NULL,
-  stderr_line_callback = NULL, stderr_callback = NULL,
+  stderr_line_callback = NULL, stderr_callback = NULL, env = NULL,
   windows_verbatim_args = FALSE, windows_hide_window = FALSE,
-  encoding = "") {
+  encoding = "", cleanup_tree = FALSE) {
 
   assert_that(is_flag(error_on_status))
   assert_that(is_time_interval(timeout))
@@ -108,6 +110,7 @@ run <- function(
               is.function(stderr_line_callback))
   assert_that(is.null(stdout_callback) || is.function(stdout_callback))
   assert_that(is.null(stderr_callback) || is.function(stderr_callback))
+  assert_that(is_flag(cleanup_tree))
   ## The rest is checked by process$new()
   "!DEBUG run() Checked arguments"
 
@@ -118,7 +121,8 @@ run <- function(
     command, args, echo_cmd = echo_cmd, wd = wd,
     windows_verbatim_args = windows_verbatim_args,
     windows_hide_window = windows_hide_window,
-    stdout = "|", stderr = "|", encoding = encoding
+    stdout = "|", stderr = "|", env = env, encoding = encoding,
+    cleanup_tree = cleanup_tree
   )
   "#!DEBUG run() Started the process: `pr$get_pid()`"
 
@@ -138,10 +142,12 @@ run <- function(
     interrupt = function(e) {
       tryCatch(pr$kill(), error = function(e) NULL)
       "!DEBUG run() process `pr$get_pid()` killed on interrupt"
-      stop(make_condition(
+      signalCondition(make_condition(
         list(interrupt = TRUE),
         runcall
       ))
+      cat("\n")
+      invokeRestart("abort")
     }
   )
 
@@ -282,7 +288,7 @@ make_condition <- function(result, call) {
         stderr = NULL,
         call = call
       ),
-      class = c("system_command_interrupt", "condition")
+      class = c("system_command_interrupt", "interrupt", "condition")
     )
 
   } else if (isTRUE(result$timeout)) {

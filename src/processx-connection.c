@@ -10,9 +10,17 @@
 #ifndef _WIN32
 #include <sys/uio.h>
 #include <poll.h>
+#else
+#include <io.h>
 #endif
 
 #include "processx.h"
+
+#ifdef _WIN32
+#include "win/processx-win.h"
+#else
+#include "unix/processx-unix.h"
+#endif
 
 /* Internal functions in this file */
 
@@ -71,6 +79,69 @@ SEXP processx_connection_create(SEXP handle, SEXP encoding) {
 
   processx_c_connection_create(*os_handle, PROCESSX_FILE_TYPE_ASYNCPIPE,
 			       c_encoding, &result);
+  return result;
+}
+
+SEXP processx_connection_create_fd(SEXP handle, SEXP encoding, SEXP close) {
+  int fd = INTEGER(handle)[0];
+  const char *c_encoding = CHAR(STRING_ELT(encoding, 0));
+  processx_file_handle_t os_handle;
+  processx_connection_t *con;
+  SEXP result = R_NilValue;
+
+#ifdef _WIN32
+  os_handle = (HANDLE) _get_osfhandle(fd);
+#else
+  os_handle = fd;
+#endif
+
+  con = processx_c_connection_create(os_handle, PROCESSX_FILE_TYPE_ASYNCPIPE,
+				     c_encoding, &result);
+
+  if (! LOGICAL(close)[0]) con->close_on_destroy = 0;
+
+  return result;
+}
+
+SEXP processx_connection_create_file(SEXP filename, SEXP read, SEXP write) {
+  const char *c_filename = CHAR(STRING_ELT(filename, 0));
+  int c_read = LOGICAL(read)[0];
+  int c_write = LOGICAL(write)[0];
+  SEXP result = R_NilValue;
+  processx_file_handle_t os_handle;
+
+#ifdef _WIN32
+  DWORD access = 0, create = 0;
+  if (c_read) access |= GENERIC_READ;
+  if (c_write) access |= GENERIC_WRITE;
+  if (c_read) create |= OPEN_EXISTING;
+  if (c_write) create |= CREATE_ALWAYS;
+  os_handle = CreateFile(
+    /* lpFilename = */ c_filename,
+    /* dwDesiredAccess = */ access,
+    /* dwShareMode = */ 0,
+    /* lpSecurityAttributes = */ NULL,
+    /* dwCreationDisposition = */ create,
+    /* dwFlagsAndAttributes = */ FILE_ATTRIBUTE_NORMAL,
+    /* hTemplateFile = */ NULL);
+  if (os_handle == INVALID_HANDLE_VALUE) {
+    PROCESSX_ERROR("Cannot open file", GetLastError());
+  }
+
+#else
+  int flags = 0;
+  if ( c_read && !c_write) flags |= O_RDONLY;
+  if (!c_read &&  c_write) flags |= O_WRONLY | O_CREAT | O_TRUNC;
+  if ( c_read &&  c_write) flags |= O_RDWR;
+  os_handle = open(c_filename, flags, 0644);
+  if (os_handle == -1) {
+    error("Cannot open file `%s`: `%s`", c_filename, strerror(errno));
+  }
+#endif
+
+  processx_c_connection_create(os_handle, PROCESSX_FILE_TYPE_FILE,
+			       "", &result);
+
   return result;
 }
 
@@ -133,6 +204,22 @@ SEXP processx_connection_read_lines(SEXP con, SEXP nlines) {
   return result;
 }
 
+SEXP processx_connection_write_bytes(SEXP con, SEXP bytes) {
+  processx_connection_t *ccon = R_ExternalPtrAddr(con);
+  Rbyte *cbytes = RAW(bytes);
+  size_t nbytes = LENGTH(bytes);
+  SEXP result;
+
+  ssize_t written = processx_c_connection_write_bytes(ccon, cbytes, nbytes);
+
+  size_t left = nbytes - written;
+  PROTECT(result = allocVector(RAWSXP, left));
+  if (left > 0) memcpy(RAW(result), cbytes + written, left);
+
+  UNPROTECT(1);
+  return result;
+}
+
 SEXP processx_connection_is_eof(SEXP con) {
   processx_connection_t *ccon = R_ExternalPtrAddr(con);
   if (!ccon) error("Invalid connection object");
@@ -159,6 +246,156 @@ SEXP processx_connection_poll(SEXP pollables, SEXP timeout) {
   return R_NilValue;
 }
 
+SEXP processx_connection_create_pipepair(SEXP encoding) {
+  const char *c_encoding = CHAR(STRING_ELT(encoding, 0));
+  SEXP result, con1, con2;
+
+#ifdef _WIN32
+  HANDLE h1, h2;
+  processx__create_pipe(0, &h1, &h2);
+
+#else
+  int pipe[2], h1, h2;
+  processx__make_socketpair(pipe);
+  processx__nonblock_fcntl(pipe[0], 1);
+  processx__nonblock_fcntl(pipe[1], 0);
+  h1 = pipe[0];
+  h2 = pipe[1];
+#endif
+
+  processx_c_connection_create(h1, PROCESSX_FILE_TYPE_ASYNCPIPE,
+			       c_encoding, &con1);
+  PROTECT(con1);
+  processx_c_connection_create(h2, PROCESSX_FILE_TYPE_ASYNCPIPE,
+			       c_encoding, &con2);
+  PROTECT(con2);
+
+  result = PROTECT(allocVector(VECSXP, 2));
+  SET_VECTOR_ELT(result, 0, con1);
+  SET_VECTOR_ELT(result, 1, con2);
+
+  UNPROTECT(3);
+  return result;
+}
+
+SEXP processx__connection_set_std(SEXP con, int which, int drop) {
+  processx_connection_t *ccon = R_ExternalPtrAddr(con);
+  if (!ccon) error("Invalid connection object");
+  SEXP result = R_NilValue;
+
+#ifdef _WIN32
+  int fd, ret;
+  if (!drop) {
+    int saved = _dup(which);
+    processx_file_handle_t os_handle;
+    if (saved == -1) {
+      PROCESSX_ERROR("Cannot save stdout/stderr for rerouting", GetLastError());
+    }
+    os_handle = (HANDLE) _get_osfhandle(saved) ;
+    processx_c_connection_create(os_handle, PROCESSX_FILE_TYPE_PIPE,
+				 "", &result);
+  }
+  fd = _open_osfhandle((intptr_t) ccon->handle.handle, 0);
+  ret = _dup2(fd, which);
+  if (ret) PROCESSX_ERROR("Cannot reroute stdout/stderr", GetLastError());
+
+#else
+  const char *what[] = { "stdin", "stdout", "stderr" };
+  int ret;
+  if (!drop) {
+    processx_file_handle_t os_handle = dup(which);
+    if (os_handle == -1) {
+      error("Cannot save %s for rerouting: `%s`", what[which], strerror(errno));
+    }
+    processx_c_connection_create(os_handle, PROCESSX_FILE_TYPE_PIPE,
+				 "", &result);
+  }
+  ret = dup2(ccon->handle, which);
+  if (ret == -1) {
+    error("Cannot reroute %s: `%s`", what[which], strerror(errno));
+  }
+#endif
+
+  return result;
+}
+
+SEXP processx_connection_set_stdout(SEXP con, SEXP drop) {
+  return processx__connection_set_std(con, 1, LOGICAL(drop)[0]);
+}
+
+SEXP processx_connection_set_stderr(SEXP con, SEXP drop) {
+  return processx__connection_set_std(con, 2, LOGICAL(drop)[0]);
+}
+
+SEXP processx_connection_get_fileno(SEXP con) {
+  processx_connection_t *ccon = R_ExternalPtrAddr(con);
+  if (!ccon) error("Invalid connection object");
+  int fd;
+
+#ifdef _WIN32
+  fd = _open_osfhandle((intptr_t) ccon->handle.handle, 0);
+#else
+  fd = ccon->handle;
+#endif
+
+  return ScalarInteger(fd);
+}
+
+#ifdef _WIN32
+
+/*
+ * Clear the HANDLE_FLAG_INHERIT flag from all HANDLEs that were inherited
+ * the parent process. Don't check for errors - the stdio handles may not be
+ * valid, or may be closed already. There is no guarantee that this function
+ * does a perfect job.
+ */
+
+SEXP processx_connection_disable_inheritance() {
+  HANDLE handle;
+  STARTUPINFOW si;
+
+  /* Make the windows stdio handles non-inheritable. */
+  handle = GetStdHandle(STD_INPUT_HANDLE);
+  if (handle != NULL && handle != INVALID_HANDLE_VALUE) {
+    SetHandleInformation(handle, HANDLE_FLAG_INHERIT, 0);
+  }
+
+  handle = GetStdHandle(STD_OUTPUT_HANDLE);
+  if (handle != NULL && handle != INVALID_HANDLE_VALUE) {
+    SetHandleInformation(handle, HANDLE_FLAG_INHERIT, 0);
+  }
+
+  handle = GetStdHandle(STD_ERROR_HANDLE);
+  if (handle != NULL && handle != INVALID_HANDLE_VALUE) {
+    SetHandleInformation(handle, HANDLE_FLAG_INHERIT, 0);
+  }
+
+  /* Make inherited CRT FDs non-inheritable. */
+  GetStartupInfoW(&si);
+  if (processx__stdio_verify(si.lpReserved2, si.cbReserved2)) {
+    processx__stdio_noinherit(si.lpReserved2);
+  }
+
+  return R_NilValue;
+}
+
+#else
+
+SEXP processx_connection_disable_inheritance() {
+  int fd;
+
+  /* Set the CLOEXEC flag on all open descriptors. Unconditionally try the
+   * first 16 file descriptors. After that, bail out after the first error.
+   */
+  for (fd = 0; ; fd++) {
+    if (processx__cloexec_fcntl(fd, 1) && fd > 15) break;
+  }
+
+  return R_NilValue;
+}
+
+#endif
+
 /* Api from C -----------------------------------------------------------*/
 
 processx_connection_t *processx_c_connection_create(
@@ -177,6 +414,7 @@ processx_connection_t *processx_c_connection_create(
   con->is_closed_ = 0;
   con->is_eof_  = 0;
   con->is_eof_raw_ = 0;
+  con->close_on_destroy = 1;
   con->iconv_ctx = 0;
 
   con->buffer = 0;
@@ -201,27 +439,6 @@ processx_connection_t *processx_c_connection_create(
   con->handle.handle = os_handle;
   memset(&con->handle.overlapped, 0, sizeof(OVERLAPPED));
   con->handle.read_pending = FALSE;
-  con->handle.overlapped.hEvent = CreateEvent(
-    /* lpEventAttributes = */ NULL,
-    /* bManualReset = */      FALSE,
-    /* bInitialState = */     FALSE,
-    /* lpName = */            NULL);
-
-  if (con->handle.overlapped.hEvent == NULL) {
-    free(con);
-    PROCESSX_ERROR("Cannot create connection event", GetLastError());
-    return 0; 			/* never reached */
-  }
-
-  HANDLE iocp = processx__get_default_iocp();
-  HANDLE res = CreateIoCompletionPort(
-    /* FileHandle =  */                con->handle.handle,
-    /* ExistingCompletionPort = */     iocp,
-    /* CompletionKey = */              (ULONG_PTR) con,
-    /* NumberOfConcurrentThreads = */  0);
-
-  if (!res) PROCESSX_ERROR("cannot add file to IOCP", GetLastError());
-
 #else
   con->handle = os_handle;
 #endif
@@ -232,18 +449,18 @@ processx_connection_t *processx_c_connection_create(
     class = PROTECT(ScalarString(mkChar("processx_connection")));
     setAttrib(result, R_ClassSymbol, class);
     *r_connection = result;
+    UNPROTECT(2);
   }
 
-  if (r_connection) UNPROTECT(2);
   return con;
 }
 
 /* Destroy */
 void processx_c_connection_destroy(processx_connection_t *ccon) {
 
-  processx_c_connection_close(ccon);
-
   if (!ccon) return;
+
+  if (ccon->close_on_destroy) processx_c_connection_close(ccon);
 
   if (ccon->iconv_ctx) Riconv_close(ccon->iconv_ctx);
 
@@ -342,6 +559,38 @@ ssize_t processx_c_connection_read_line(processx_connection_t *ccon,
   }
 
   return newline;
+}
+
+/* Write bytes */
+ssize_t processx_c_connection_write_bytes(
+  processx_connection_t *ccon,
+  const void *buffer,
+  size_t nbytes) {
+
+  PROCESSX_CHECK_VALID_CONN(ccon);
+
+#ifdef _WIN32
+  DWORD written;
+  BOOL ret = WriteFile(
+    /* hFile =                  */ ccon->handle.handle,
+    /* lpBuffer =               */ buffer,
+    /* nNumberOfBytesToWrite =  */ nbytes,
+    /* lpNumberOfBytesWritten = */ &written,
+    /* lpOverlapped =           */ NULL);
+  if (!ret) PROCESSX_ERROR("Cannot write connection ", GetLastError());
+  return (ssize_t) written;
+#else
+  ssize_t ret = write(ccon->handle, buffer, nbytes);
+  if (ret == -1) {
+    if (errno == EAGAIN || errno == EWOULDBLOCK) {
+      return 0;
+    } else {
+      error("Cannot write connection: %s at %s:%d", strerror(errno),
+	    __FILE__, __LINE__);
+    }
+  }
+  return ret;
+#endif
 }
 
 /* Check if the connection has ended */
@@ -551,6 +800,29 @@ void processx__connection_start_read(processx_connection_t *ccon) {
 
   if (ccon->handle.read_pending) return;
 
+  if (! ccon->handle.overlapped.hEvent &&
+      (ccon->type == PROCESSX_FILE_TYPE_ASYNCFILE ||
+       ccon->type == PROCESSX_FILE_TYPE_ASYNCPIPE)) {
+    ccon->handle.overlapped.hEvent = CreateEvent(
+      /* lpEventAttributes = */ NULL,
+      /* bManualReset = */      FALSE,
+      /* bInitialState = */     FALSE,
+      /* lpName = */            NULL);
+
+    if (ccon->handle.overlapped.hEvent == NULL) {
+      PROCESSX_ERROR("Cannot read from connection", GetLastError());
+    }
+
+    HANDLE iocp = processx__get_default_iocp();
+    HANDLE res = CreateIoCompletionPort(
+      /* FileHandle =  */                ccon->handle.handle,
+      /* ExistingCompletionPort = */     iocp,
+      /* CompletionKey = */              (ULONG_PTR) ccon,
+      /* NumberOfConcurrentThreads = */  0);
+
+    if (!res) PROCESSX_ERROR("cannot add file to IOCP", GetLastError());
+  }
+
   if (!ccon->buffer) processx__connection_alloc(ccon);
 
   todo = ccon->buffer_allocated_size - ccon->buffer_data_size;
@@ -651,6 +923,15 @@ int processx_c_pollable_from_connection(
   return 0;
 }
 
+processx_file_handle_t processx_c_connection_fileno(
+  const processx_connection_t *con) {
+#ifdef _WIN32
+  return con->handle.handle;
+#else
+  return con->handle;
+#endif
+}
+
 /* --------------------------------------------------------------------- */
 /* Internals                                                             */
 /* --------------------------------------------------------------------- */
@@ -738,7 +1019,6 @@ static void processx__connection_find_lines(processx_connection_t *ccon,
 
 static void processx__connection_xfinalizer(SEXP con) {
   processx_connection_t *ccon = R_ExternalPtrAddr(con);
-
   processx_c_connection_destroy(ccon);
 }
 

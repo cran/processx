@@ -2,6 +2,14 @@
 #ifndef R_PROCESSX_UNIX_H
 #define R_PROCESSX_UNIX_H
 
+# ifndef O_CLOEXEC
+#  define O_CLOEXEC 02000000
+# endif
+
+# ifndef SOCK_CLOEXEC
+#  define SOCK_CLOEXEC O_CLOEXEC
+# endif
+
 typedef struct processx_handle_s {
   int exitcode;
   int collected;	 /* Whether exit code was collected already */
@@ -11,6 +19,7 @@ typedef struct processx_handle_s {
   int fd2;			/* readable */
   int waitpipe[2];		/* use it for wait() with timeout */
   int cleanup;
+  double create_time;
   processx_connection_t *pipes[3];
 } processx_handle_t;
 
@@ -30,7 +39,7 @@ SEXP processx__killem_all();
 
 typedef struct processx__child_list_s {
   pid_t pid;
-  SEXP status;
+  SEXP weak_status;
   struct processx__child_list_s *next;
 } processx__child_list_t;
 
@@ -60,6 +69,10 @@ int processx__interruptible_poll(struct pollfd fds[],
 				 nfds_t nfds, int timeout);
 
 #define PROCESSX__ERROR(msg1, msg2) \
-  error("%s %s at %s:%s", msg1, msg2, __FILE__,  __LINE__)
+  error("%s %s at %s:%d", msg1, msg2, __FILE__,  __LINE__)
+
+void processx__make_socketpair(int pipe[2]);
+
+double processx__create_time(long pid);
 
 #endif
