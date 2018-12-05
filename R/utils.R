@@ -188,7 +188,7 @@ get_id <- function() {
   paste0(
     "PS",
     paste(sample(c(LETTERS, 0:9), 10, replace = TRUE), collapse = ""),
-    "_", as.integer(Internal(Sys.time()))
+    "_", as.integer(asNamespace("base")$.Internal(Sys.time()))
   )
 }
 
@@ -206,4 +206,8 @@ file_size <- function(x) {
 
 disable_crash_dialog <- function() {
   .Call(c_processx_disable_crash_dialog)
+}
+
+has_package <- function(pkg) {
+  requireNamespace(pkg, quietly = TRUE)
 }

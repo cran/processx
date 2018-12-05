@@ -5,17 +5,23 @@
 \alias{conn_create_pipepair}
 \alias{conn_read_chars}
 \alias{conn_read_chars.processx_connection}
+\alias{processx_conn_read_chars}
 \alias{conn_read_lines}
 \alias{conn_read_lines.processx_connection}
+\alias{processx_conn_read_lines}
 \alias{conn_is_incomplete}
 \alias{conn_is_incomplete.processx_connection}
+\alias{processx_conn_is_incomplete}
 \alias{conn_write}
 \alias{conn_write.processx_connection}
+\alias{processx_conn_write}
 \alias{conn_create_file}
 \alias{conn_set_stdout}
 \alias{conn_set_stderr}
 \alias{conn_get_fileno}
 \alias{conn_disable_inheritance}
+\alias{close.processx_connection}
+\alias{processx_conn_close}
 \title{Processx connections}
 \usage{
 conn_create_fd(fd, encoding = "", close = TRUE)
@@ -26,18 +32,26 @@ conn_read_chars(con, n = -1)
 
 \method{conn_read_chars}{processx_connection}(con, n = -1)
 
+processx_conn_read_chars(con, n = -1)
+
 conn_read_lines(con, n = -1)
 
 \method{conn_read_lines}{processx_connection}(con, n = -1)
+
+processx_conn_read_lines(con, n = -1)
 
 conn_is_incomplete(con)
 
 \method{conn_is_incomplete}{processx_connection}(con)
 
+processx_conn_is_incomplete(con)
+
 conn_write(con, str, sep = "\\n", encoding = "")
 
 \method{conn_write}{processx_connection}(con, str, sep = "\\n",
   encoding = "")
+
+processx_conn_write(con, str, sep = "\\n", encoding = "")
 
 conn_create_file(filename, read = NULL, write = NULL)
 
@@ -48,6 +62,10 @@ conn_set_stderr(con, drop = TRUE)
 conn_get_fileno(con)
 
 conn_disable_inheritance()
+
+\method{close}{processx_connection}(con, ...)
+
+processx_conn_close(con, ...)
 }
 \arguments{
 \item{fd}{Integer scalar, a Unix file descriptor.}
@@ -77,11 +95,17 @@ characters or lines.}
 
 \item{drop}{Whether to close the original stdout/stderr, or keep it
 open and return a connection to it.}
+
+\item{...}{Extra arguments, for compatibility with the \code{close()}
+generic, currently ignored by processx.}
 }
 \description{
 These functions are currently experimental and will change
 in the future. Note that processx connections are  \emph{not}
 compatible with R's built-in connection system.
+}
+\details{
+\code{conn_create_fd()} creates a connection from a file descriptor.
 
 \code{conn_create_pipepair()} creates a pair of connected connections, the
 first one is writeable, the second one is readable.
@@ -110,10 +134,10 @@ specified connection.
 \code{conn_get_fileno()} return the integer file desciptor that belongs to
 the connection.
 
+\code{conn_disable_inheritance()} can be called to disable the inheritance
+of all open handles. Call this function as soon as possible in a new
+process to avoid inheriting the inherited handles even further.
 The function is best effort to close the handles, it might still leave
 some handles open. It should work for \code{stdin}, \code{stdout} and \code{stderr},
 at least.
-}
-\details{
-\code{conn_create_fd()} creates a connection from a file descriptor.
 }
