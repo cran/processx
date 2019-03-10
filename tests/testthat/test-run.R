@@ -7,6 +7,7 @@ test_that("run can run", {
   expect_error({
     run(px, c("sleep", "0"))
   }, NA)
+  gc()
 })
 
 test_that("timeout works", {
@@ -18,6 +19,7 @@ test_that("timeout works", {
 
   expect_true(toc - tic < as.difftime(3, units = "secs"))
   expect_true(x$timeout)
+  gc()
 })
 
 test_that("timeout throws right error", {
@@ -29,6 +31,7 @@ test_that("timeout throws right error", {
   )
 
   expect_true("system_command_timeout_error" %in% class(e))
+  gc()
 })
 
 test_that("callbacks work", {
@@ -43,6 +46,7 @@ test_that("callbacks work", {
       stdout_line_callback = function(x, ...) out <<- c(out, x)
     )
     expect_equal(out, as.character(1:20))
+    gc()
   }
 
   for (i in 1:30) {
@@ -53,6 +57,7 @@ test_that("callbacks work", {
       error_on_status = FALSE
     )
     expect_equal(out, as.character(1:20))
+    gc()
   }
 })
 
@@ -68,9 +73,25 @@ test_that("working directory", {
   } else {
     expect_equal(x$stdout, "foo\nbar\n")
   }
+  gc()
 })
 
 test_that("working directory does not exist", {
   px <- get_tool("px")
   expect_error(run(px, wd = tempfile()))
+  gc()
+})
+
+test_that("stderr_to_stdout", {
+  px <- get_tool("px")
+
+  out <- run(
+    px, c("out", "o1", "err", "e1", "out", "o2", "err", "e2", "outln", ""),
+    stderr_to_stdout = TRUE)
+
+  expect_equal(out$status, 0L)
+  expect_equal(
+    out$stdout, paste0("o1e1o2e2", if (is_windows()) "\r", "\n"))
+  expect_equal(out$stderr, "")
+  expect_false(out$timeout)
 })

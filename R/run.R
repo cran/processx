@@ -11,6 +11,7 @@
 #' * Calling a callback function for each line or each chunk of the
 #'   standard output and/or error. A chunk may contain multiple lines, and
 #'   can be as short as a single character.
+#' * Cleaning up the subprocess, or the whole process tree, before exiting.
 #'
 #' @section Callbacks:
 #'
@@ -53,6 +54,11 @@
 #'   of the standard error. A chunk can be as small as a single character.
 #'   At most one of `stderr_line_callback` and `stderr_callback` can be
 #'   non-`NULL`.
+#' @param stderr_to_stdout Whether to redirect the standard error to the
+#'   standard output. Specifying `TRUE` here will keep both in the
+#'   standard output, correctly interleaved. However, it is not possible
+#'   to deduce where pieces of the output were coming from. If this is
+#'   `TRUE`, the standard error callbacks  (if any) are never called.
 #' @param env Environment of the child process, a named character vector.
 #'   IF `NULL`, the environment of the parent is inherited.
 #' @param windows_verbatim_args Whether to omit the escaping of the
@@ -97,7 +103,8 @@ run <- function(
   command = NULL, args = character(), error_on_status = TRUE, wd = NULL,
   echo_cmd = FALSE, echo = FALSE, spinner = FALSE,
   timeout = Inf, stdout_line_callback = NULL, stdout_callback = NULL,
-  stderr_line_callback = NULL, stderr_callback = NULL, env = NULL,
+  stderr_line_callback = NULL, stderr_callback = NULL,
+  stderr_to_stdout = FALSE, env = NULL,
   windows_verbatim_args = FALSE, windows_hide_window = FALSE,
   encoding = "", cleanup_tree = FALSE) {
 
@@ -111,20 +118,29 @@ run <- function(
   assert_that(is.null(stdout_callback) || is.function(stdout_callback))
   assert_that(is.null(stderr_callback) || is.function(stderr_callback))
   assert_that(is_flag(cleanup_tree))
+  assert_that(is_flag(stderr_to_stdout))
   ## The rest is checked by process$new()
   "!DEBUG run() Checked arguments"
 
   if (!interactive()) spinner <- FALSE
 
   ## Run the process
+  stderr <- if (stderr_to_stdout) "2>&1" else "|"
   pr <- process$new(
     command, args, echo_cmd = echo_cmd, wd = wd,
     windows_verbatim_args = windows_verbatim_args,
     windows_hide_window = windows_hide_window,
-    stdout = "|", stderr = "|", env = env, encoding = encoding,
+    stdout = "|", stderr = stderr, env = env, encoding = encoding,
     cleanup_tree = cleanup_tree
   )
   "#!DEBUG run() Started the process: `pr$get_pid()`"
+
+  ## We make sure that the process is eliminated
+  if (cleanup_tree) {
+    on.exit(pr$kill_tree(), add = TRUE)
+  } else {
+    on.exit(pr$kill(), add = TRUE)
+  }
 
   ## If echo, then we need to create our own callbacks.
   ## These are merged to user callbacks if there are any.
@@ -200,7 +216,7 @@ run_manage <- function(proc, timeout, spinner, stdout_line_callback,
       }
     }
 
-    newerr <- proc$read_error(2000)
+    newerr <- if (proc$has_error_connection()) proc$read_error(2000)
     if (length(newerr) && nzchar(newerr)) {
       stderr <<- paste0(stderr, newerr)
       if (!is.null(stderr_callback)) stderr_callback(newerr, proc)
@@ -231,7 +247,7 @@ run_manage <- function(proc, timeout, spinner, stdout_line_callback,
   while (proc$is_alive()) {
     ## Timeout? Maybe finished by now...
     if (!is.null(timeout) && Sys.time() - start_time > timeout) {
-      if (proc$kill()) timeout_happened <- TRUE
+      if (proc$kill(close_connections = FALSE)) timeout_happened <- TRUE
       "!DEBUG Timeout killed run() process `proc$get_pid()`"
       break
     }
@@ -262,7 +278,8 @@ run_manage <- function(proc, timeout, spinner, stdout_line_callback,
 
   ## We might still have output
   "!DEBUG run() reading leftover output / error, process `proc$get_pid()`"
-  while (proc$is_incomplete_output() || proc$is_incomplete_error()) {
+  while (proc$is_incomplete_output() ||
+         (proc$has_error_connection() && proc$is_incomplete_error())) {
     proc$poll_io(-1)
     do_output()
   }

@@ -24,8 +24,8 @@ NULL
 #' p$is_alive()
 #' p$signal(signal)
 #' p$interrupt()
-#' p$kill(grace = 0.1)
-#' p$kill_tree(grace = 0.1)
+#' p$kill(grace = 0.1, close_connections = TRUE)
+#' p$kill_tree(grace = 0.1, close_connections = TRUE)
 #' p$wait(timeout = -1)
 #' p$get_pid()
 #' p$get_exit_status()
@@ -92,7 +92,9 @@ NULL
 #'     `"|"`: create a connection for it.
 #' * `stderr`: What to do with the standard error. Possible values:
 #'     `NULL`: discard it; a string, redirect it to this file;
-#'     `"|"`: create a connection for it.
+#'     `"|"`: create a connection for it; `"2>&1"`: redirect it to the
+#'     same connection (i.e. pipe or file) as `stdout`. `"2>&1"` is a
+#'     way to keep standard output and error correctly interleaved.
 #' * `connections`: A list of connections to pass to the child process.
 #'     This is an experimental feature currently.
 #' * `poll_connection`: Whether to create an extra connection to the process
@@ -128,6 +130,9 @@ NULL
 #' * `signal`: An integer scalar, the id of the signal to send to
 #'     the process. See [tools::pskill()] for the list of signals.
 #' * `grace`: Currently not used.
+#' * `close_connections`: Whether to close standard input, standard output,
+#'    standard error connections and the poll connection, after killing
+#'    the process.
 #' * `timeout`: Timeout in milliseconds, for the wait or the I/O
 #'     polling.
 #' * `n`: Number of characters or lines to read.
@@ -356,6 +361,33 @@ NULL
 #' can poll the output of several processes, and returns as soon as any
 #' of them has generated output (or exited).
 #'
+#' @section Cleaning up background processes:
+#' processx kills processes that are not referenced any more (if `cleanup`
+#' is set to `TRUE`), or the whole subprocess tree (if `cleanup_tree` is
+#' also set to `TRUE`).
+#'
+#' The cleanup happens when the references of the processes object are
+#' garbage collected. To clean up earlier, you can call the `kill()` or
+#' `kill_tree()` method of the process(es), from an `on.exit()` expression,
+#' or an error handler:
+#' ```r
+#' process_manager <- function() {
+#'   on.exit({
+#'     try(p1$kill(), silent = TRUE)
+#'     try(p2$kill(), silent = TRUE)
+#'   }, add = TRUE)
+#'   p1 <- process$new("sleep", "3")
+#'   p2 <- process$new("sleep", "10")
+#'   p1$wait()
+#'   p2$wait()
+#' }
+#' process_manager()
+#' ```
+#'
+#' If you interrupt `process_manager()` or an error happens then both `p1`
+#' and `p2` are cleaned up immediately. Their connections will also be
+#' closed. The same happens at a regular exit.
+#'
 #' @name process
 #' @examples
 #' # CRAN does not like long-running examples
@@ -402,11 +434,11 @@ process <- R6::R6Class(
           ps::ps_is_supported()) self$kill_tree()
     },
 
-    kill = function(grace = 0.1)
-      process_kill(self, private, grace),
+    kill = function(grace = 0.1, close_connections = TRUE)
+      process_kill(self, private, grace, close_connections),
 
-    kill_tree = function(grace = 0.1)
-      process_kill_tree(self, private, grace),
+    kill_tree = function(grace = 0.1, close_connections = TRUE)
+      process_kill_tree(self, private, grace, close_connections),
 
     signal = function(signal)
       process_signal(self, private, signal),
@@ -590,7 +622,9 @@ process <- R6::R6Class(
     tree_id = NULL,
 
     get_short_name = function()
-      process_get_short_name(self, private)
+      process_get_short_name(self, private),
+    close_connections = function()
+      process_close_connections(self, private)
   )
 )
 
@@ -629,14 +663,14 @@ process_interrupt <- function(self, private) {
   }
 }
 
-process_kill <- function(self, private, grace) {
+process_kill <- function(self, private, grace, close_connections) {
   "!DEBUG process_kill '`private$get_short_name()`', pid `self$get_pid()`"
   ret <- .Call(c_processx_kill, private$status, as.numeric(grace))
-  if (!is.null(p <- private$poll_pipe)) .Call(c_processx_connection_close, p)
+  if (close_connections) private$close_connections()
   ret
 }
 
-process_kill_tree <- function(self, private, grace) {
+process_kill_tree <- function(self, private, grace, close_connections) {
   "!DEBUG process_kill_tree '`private$get_short_name()`', pid `self$get_pid()`"
   if (!ps::ps_is_supported()) {
     stop(structure(
@@ -645,7 +679,7 @@ process_kill_tree <- function(self, private, grace) {
   }
 
   ret <- get("ps_kill_tree", asNamespace("ps"))(private$tree_id)
-  if (!is.null(p <- private$poll_pipe)) .Call(c_processx_connection_close, p)
+  if (close_connections) private$close_connections()
   ret
 }
 
@@ -687,4 +721,12 @@ process_as_ps_handle <- function(self, private) {
 
 ps_method <- function(fun, self) {
   fun(ps::ps_handle(self$get_pid(), self$get_start_time()))
+}
+
+process_close_connections <- function(self, private) {
+  for (f in c("stdin_pipe", "stdout_pipe", "stderr_pipe", "poll_pipe")) {
+    if (!is.null(p <- private[[f]])) {
+      .Call(c_processx_connection_close, p)
+    }
+  }
 }

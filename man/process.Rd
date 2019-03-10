@@ -23,8 +23,8 @@ streams. The process id is then used to manage the process.
 p$is_alive()
 p$signal(signal)
 p$interrupt()
-p$kill(grace = 0.1)
-p$kill_tree(grace = 0.1)
+p$kill(grace = 0.1, close_connections = TRUE)
+p$kill_tree(grace = 0.1, close_connections = TRUE)
 p$wait(timeout = -1)
 p$get_pid()
 p$get_exit_status()
@@ -94,7 +94,9 @@ provided; a string, supply the specified string as standard input;
 \code{"|"}: create a connection for it.
 \item \code{stderr}: What to do with the standard error. Possible values:
 \code{NULL}: discard it; a string, redirect it to this file;
-\code{"|"}: create a connection for it.
+\code{"|"}: create a connection for it; \code{"2>&1"}: redirect it to the
+same connection (i.e. pipe or file) as \code{stdout}. \code{"2>&1"} is a
+way to keep standard output and error correctly interleaved.
 \item \code{connections}: A list of connections to pass to the child process.
 This is an experimental feature currently.
 \item \code{poll_connection}: Whether to create an extra connection to the process
@@ -130,6 +132,9 @@ on Windows. It is ignored on other platforms.
 \item \code{signal}: An integer scalar, the id of the signal to send to
 the process. See \code{\link[tools:pskill]{tools::pskill()}} for the list of signals.
 \item \code{grace}: Currently not used.
+\item \code{close_connections}: Whether to close standard input, standard output,
+standard error connections and the poll connection, after killing
+the process.
 \item \code{timeout}: Timeout in milliseconds, for the wait or the I/O
 polling.
 \item \code{n}: Number of characters or lines to read.
@@ -364,6 +369,33 @@ in either of them, or they are closed (e.g. because the process exits)
 In addition to polling a single process, the \code{\link[=poll]{poll()}} function
 can poll the output of several processes, and returns as soon as any
 of them has generated output (or exited).
+}
+
+\section{Cleaning up background processes}{
+
+processx kills processes that are not referenced any more (if \code{cleanup}
+is set to \code{TRUE}), or the whole subprocess tree (if \code{cleanup_tree} is
+also set to \code{TRUE}).
+
+The cleanup happens when the references of the processes object are
+garbage collected. To clean up earlier, you can call the \code{kill()} or
+\code{kill_tree()} method of the process(es), from an \code{on.exit()} expression,
+or an error handler:\preformatted{process_manager <- function() {
+  on.exit({
+    try(p1$kill(), silent = TRUE)
+    try(p2$kill(), silent = TRUE)
+  }, add = TRUE)
+  p1 <- process$new("sleep", "3")
+  p2 <- process$new("sleep", "10")
+  p1$wait()
+  p2$wait()
+}
+process_manager()
+}
+
+If you interrupt \code{process_manager()} or an error happens then both \code{p1}
+and \code{p2} are cleaned up immediately. Their connections will also be
+closed. The same happens at a regular exit.
 }
 
 \examples{
