@@ -1,9 +1,9 @@
-
 #ifndef R_PROCESSX_UNIX_H
 #define R_PROCESSX_UNIX_H
 
 #include <unistd.h>
 #include <sys/types.h>
+#include <sys/signal.h>
 
 # ifndef O_CLOEXEC
 #  define O_CLOEXEC 02000000
@@ -36,7 +36,6 @@ void processx__block_sigchld();
 void processx__unblock_sigchld();
 
 void processx__finalizer(SEXP status);
-SEXP processx__killem_all();
 
 /* Child list and its functions */
 

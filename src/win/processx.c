@@ -55,7 +55,16 @@ void R_init_processx_win() {
   /* Nothing to do currently */
 }
 
-SEXP processx__killem_all() {
+SEXP processx__unload_cleanup() {
+
+  if (processx__connection_iocp) CloseHandle(processx__connection_iocp);
+  if (processx__iocp_thread) TerminateThread(processx__iocp_thread, 0);
+  if (processx__thread_start) CloseHandle(processx__thread_start);
+  if (processx__thread_done) CloseHandle(processx__thread_done);
+
+  processx__connection_iocp = processx__iocp_thread =
+    processx__thread_start = processx__thread_done = NULL;
+
   if (processx__global_job_handle) {
     TerminateJobObject(processx__global_job_handle, 1);
     CloseHandle(processx__global_job_handle);
@@ -850,6 +859,7 @@ void processx__finalizer(SEXP status) {
   }
 
   if (handle->hProcess) CloseHandle(handle->hProcess);
+  handle->hProcess = NULL;
   R_ClearExternalPtr(status);
   processx__handle_destroy(handle);
 }
@@ -1091,7 +1101,8 @@ SEXP processx_wait(SEXP status, SEXP timeout) {
   processx_handle_t *handle = R_ExternalPtrAddr(status);
   DWORD err, err2, exitcode;
 
-  if (handle->collected) return R_NilValue;
+  if (!handle) return ScalarLogical(1);
+  if (handle->collected) return ScalarLogical(1);
 
   err2 = WAIT_TIMEOUT;
   while (ctimeout < 0 || timeleft > PROCESSX_INTERRUPT_INTERVAL) {
@@ -1125,6 +1136,10 @@ SEXP processx_is_alive(SEXP status) {
   processx_handle_t *handle = R_ExternalPtrAddr(status);
   DWORD err, exitcode;
 
+  /* This might happen if it was finalized at the end of the session,
+     even though there are some references to the R object. */
+  if (!handle) return ScalarLogical(0);
+
   if (handle->collected) return ScalarLogical(0);
 
   /* Otherwise try to get exit code */
@@ -1145,6 +1160,10 @@ SEXP processx_get_exit_status(SEXP status) {
   processx_handle_t *handle = R_ExternalPtrAddr(status);
   DWORD err, exitcode;
 
+  /* This might happen if it was finalized at the end of the session,
+     even though there are some references to the R object. */
+  if (!handle) return R_NilValue;
+
   if (handle->collected) return ScalarInteger(handle->exitcode);
 
   /* Otherwise try to get exit code */
@@ -1163,6 +1182,7 @@ SEXP processx_signal(SEXP status, SEXP signal) {
   processx_handle_t *handle = R_ExternalPtrAddr(status);
   DWORD err, exitcode = STILL_ACTIVE;
 
+  if (!handle) return ScalarLogical(0);
   if (handle->collected) return ScalarLogical(0);
 
   switch (INTEGER(signal)[0]) {
@@ -1179,11 +1199,6 @@ SEXP processx_signal(SEXP status, SEXP signal) {
     }
 
     if (exitcode == STILL_ACTIVE) {
-
-      /* We only cleanup the tree if the process is still running. */
-      /* TODO: we are not running this for now, until we can properly
-	 work around pid reuse. */
-      /* processx__cleanup_child_tree(handle->dwProcessId); */
       err = processx__terminate(handle, status);
       return ScalarLogical(err != 0);
 
@@ -1225,7 +1240,9 @@ SEXP processx_kill(SEXP status, SEXP grace) {
 SEXP processx_get_pid(SEXP status) {
   processx_handle_t *handle = R_ExternalPtrAddr(status);
 
-  if (!handle) { error("Internal processx error, handle already removed"); }
+  /* This might happen if it was finalized at the end of the session,
+     even though there are some references to the R object. */
+  if (!handle) return ScalarInteger(NA_INTEGER);
 
   return ScalarInteger(handle->dwProcessId);
 }
