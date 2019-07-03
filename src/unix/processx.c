@@ -1,9 +1,15 @@
 
 #ifndef _WIN32
 
-#include "../processx.h"
+#ifndef _GNU_SOURCE
+#define _GNU_SOURCE 1
+#endif
 
+#include <stdlib.h>
+#include <fcntl.h>
 #include <stdio.h>
+
+#include "../processx.h"
 
 /* Internals */
 
@@ -11,8 +17,9 @@ static void processx__child_init(processx_handle_t *handle, int (*pipes)[2],
 				 int stdio_count, char *command, char **args,
 				 int error_fd, const char *std_in,
 				 const char *std_out,
-				 const char *std_err, char **env,
-				 processx_options_t *options,
+				 const char *std_err,
+                                 const char *pty_name, char **env,
+                                 processx_options_t *options,
 				 const char *tree_id);
 
 static SEXP processx__make_handle(SEXP private, int cleanup);
@@ -42,6 +49,9 @@ void processx__create_connections(processx_handle_t *handle, SEXP private,
 extern char **environ;
 #endif
 
+#include <termios.h>
+#include <sys/ioctl.h>
+
 extern processx__child_list_t child_list_head;
 extern processx__child_list_t *child_list;
 extern processx__child_list_t child_free_list_head;
@@ -63,6 +73,46 @@ void R_init_processx_unix() {
   child_free_list = &child_free_list_head;
 }
 
+int processx__pty_master_open(char *slave_name, size_t sn_len) {
+  int master_fd, saved_errno;
+  char *p;
+
+  master_fd = posix_openpt(O_RDWR | O_NOCTTY);
+  if (master_fd == -1) return -1;
+
+  if (grantpt(master_fd) == -1) {
+    saved_errno = errno;
+    close(master_fd);
+    errno = saved_errno;
+    return -1;
+  }
+
+  if (unlockpt(master_fd) == -1) {
+    saved_errno = errno;
+    close(master_fd);
+    errno = saved_errno;
+    return -1;
+  }
+
+  p = ptsname(master_fd);
+  if (p == NULL) {
+    saved_errno = errno;
+    close(master_fd);
+    errno = saved_errno;
+    return -1;
+  }
+
+  if (strlen(p) < sn_len) {
+    strncpy(slave_name, p, sn_len);
+  } else {
+    close(master_fd);
+    errno = EOVERFLOW;
+    return -1;
+  }
+
+  return master_fd;
+}
+
 /* These run in the child process, so no coverage here. */
 /* LCOV_EXCL_START */
 
@@ -75,21 +125,78 @@ static void processx__child_init(processx_handle_t* handle, int (*pipes)[2],
 				 int stdio_count, char *command, char **args,
 				 int error_fd, const char *std_in,
 				 const char *std_out,
-				 const char *std_err, char **env,
+				 const char *std_err,
+                                 const char *pty_name, char **env,
 				 processx_options_t *options,
 				 const char *tree_id) {
 
   int close_fd, use_fd, fd, i;
   const char *out_files[3] = { std_in, std_out, std_err };
+  int min_fd = 0;
 
   setsid();
+
+  /* Do we need a pty? */
+  if (pty_name) {
+    /* Do not mess with stdin/stdout/stderr, all handled by the pty */
+    min_fd = 3;
+
+    int slave_fd = open(pty_name, O_RDWR);
+    if (slave_fd == -1) {
+      processx__write_int(error_fd, -errno);
+      raise(SIGKILL);
+    }
+
+#ifdef TIOCSCTTY
+    if (ioctl(slave_fd, TIOCSCTTY, 0) == -1) {
+      processx__write_int(error_fd, -errno);
+      raise(SIGKILL);
+    }
+#endif
+
+    struct termios tp;
+
+    if (tcgetattr(slave_fd, &tp) == -1) {
+      processx__write_int(error_fd, -errno);
+      raise(SIGKILL);
+    }
+
+    if (options->pty_echo) {
+      tp.c_lflag |= ECHO;
+    } else {
+      tp.c_lflag &= ~ECHO;
+    }
+
+    if (tcsetattr(slave_fd, TCSAFLUSH, &tp) == -1) {
+      processx__write_int(error_fd, -errno);
+      raise(SIGKILL);
+    }
+
+    /* TODO: set other terminal attributes and size */
+
+    /* Duplicate pty slave to be child's stdin, stdout, and stderr */
+    if (dup2(slave_fd, STDIN_FILENO) != STDIN_FILENO) {
+      processx__write_int(error_fd, -errno);
+      raise(SIGKILL);
+    }
+    if (dup2(slave_fd, STDOUT_FILENO) != STDOUT_FILENO) {
+      processx__write_int(error_fd, -errno);
+      raise(SIGKILL);
+    }
+    if (dup2(slave_fd, STDERR_FILENO) != STDERR_FILENO) {
+      processx__write_int(error_fd, -errno);
+      raise(SIGKILL);
+    }
+
+    if (slave_fd > STDERR_FILENO) close(slave_fd);
+  }
 
   /* We want to prevent use_fd < fd, because we will dup2() use_fd into
      fd later. If use_fd >= fd, then this is always possible,
      without mixing up stdin, stdout and stderr. Without this, we could
      have a case when we dup2() 2 into 1, and then 1 is lost. */
 
-  for (fd = 0; fd < stdio_count; fd++) {
+  for (fd = min_fd; fd < stdio_count; fd++) {
     use_fd = pipes[fd][1];
     /* If use_fd < 0 then there is no pipe for fd. */
     if (use_fd < 0 || use_fd >= fd) continue;
@@ -105,7 +212,7 @@ static void processx__child_init(processx_handle_t* handle, int (*pipes)[2],
   /* This loop initializes the stdin, stdout, stderr fds of the child
      process properly. */
 
-  for (fd = 0; fd < stdio_count; fd++) {
+  for (fd = min_fd; fd < stdio_count; fd++) {
     /* close_fd is an fd that must be closed. Initially this is the
        parent's end of a pipe. (-1 if no pipe for this fd.) */
     close_fd = pipes[fd][0];
@@ -167,7 +274,7 @@ static void processx__child_init(processx_handle_t* handle, int (*pipes)[2],
     if (close_fd >= stdio_count) close(close_fd);
   }
 
-  for (fd = 0; fd < stdio_count; fd++) {
+  for (fd = min_fd; fd < stdio_count; fd++) {
     use_fd = pipes[fd][1];
     if (use_fd >= stdio_count) close(use_fd);
   }
@@ -249,7 +356,7 @@ static SEXP processx__make_handle(SEXP private, int cleanup) {
   SEXP result;
 
   handle = (processx_handle_t*) malloc(sizeof(processx_handle_t));
-  if (!handle) { error("Out of memory"); }
+  if (!handle) { R_THROW_ERROR("Out of memory"); }
   memset(handle, 0, sizeof(processx_handle_t));
   handle->waitpipe[0] = handle->waitpipe[1] = -1;
 
@@ -278,7 +385,7 @@ void processx__make_socketpair(int pipe[2]) {
    * Anything else is a genuine error.
    */
   if (errno != EINVAL) {
-    error("processx socketpair: %s", strerror(errno)); /* LCOV_EXCL_LINE */
+    R_THROW_SYSTEM_ERROR("processx socketpair");
   }
 
   no_cloexec = 1;
@@ -287,7 +394,7 @@ skip:
 #endif
 
   if (socketpair(AF_UNIX, SOCK_STREAM, 0, pipe)) {
-    error("processx socketpair: %s", strerror(errno));
+    R_THROW_SYSTEM_ERROR("processx socketpair");
   }
 
   processx__cloexec_fcntl(pipe[0], 1);
@@ -295,10 +402,10 @@ skip:
 }
 
 SEXP processx_exec(SEXP command, SEXP args, SEXP std_in, SEXP std_out,
-		   SEXP std_err, SEXP connections, SEXP env,
-		   SEXP windows_verbatim_args, SEXP windows_hide_window,
-		   SEXP private, SEXP cleanup,  SEXP wd, SEXP encoding,
-		   SEXP tree_id) {
+		   SEXP std_err, SEXP pty, SEXP pty_options,
+                   SEXP connections, SEXP env, SEXP windows_verbatim_args,
+                   SEXP windows_hide_window, SEXP private, SEXP cleanup,
+                   SEXP wd, SEXP encoding, SEXP tree_id) {
 
   char *ccommand = processx__tmp_string(command, 0);
   char **cargs = processx__tmp_character(args);
@@ -307,6 +414,7 @@ SEXP processx_exec(SEXP command, SEXP args, SEXP std_in, SEXP std_out,
   const char *cstdin = isNull(std_in) ? 0 : CHAR(STRING_ELT(std_in, 0));
   const char *cstdout = isNull(std_out) ? 0 : CHAR(STRING_ELT(std_out, 0));
   const char *cstderr = isNull(std_err) ? 0 : CHAR(STRING_ELT(std_err, 0));
+  const int cpty = LOGICAL(pty)[0];
   const char *cencoding = CHAR(STRING_ELT(encoding, 0));
   const char *ctree_id = CHAR(STRING_ELT(tree_id, 0));
   processx_options_t options = { 0 };
@@ -318,6 +426,10 @@ SEXP processx_exec(SEXP command, SEXP args, SEXP std_in, SEXP std_out,
   int signal_pipe[2] = { -1, -1 };
   int (*pipes)[2];
   int i;
+  int pty_master_fd;
+#define R_PROCESSX_PTY_NAME_LEN 2014
+  char pty_namex[R_PROCESSX_PTY_NAME_LEN];
+  char *pty_name = cpty ? pty_namex : 0;
 
   processx_handle_t *handle = NULL;
   SEXP result;
@@ -328,7 +440,7 @@ SEXP processx_exec(SEXP command, SEXP args, SEXP std_in, SEXP std_out,
   options.wd = isNull(wd) ? 0 : CHAR(STRING_ELT(wd, 0));
 
   if (pipe(signal_pipe)) {
-    PROCESSX__ERROR("Cannot create pipe", strerror(errno));
+    R_THROW_SYSTEM_ERROR("Cannot create pipe");
   }
   processx__cloexec_fcntl(signal_pipe[0], 1);
   processx__cloexec_fcntl(signal_pipe[1], 1);
@@ -338,16 +450,25 @@ SEXP processx_exec(SEXP command, SEXP args, SEXP std_in, SEXP std_out,
   result = PROTECT(processx__make_handle(private, ccleanup));
   handle = R_ExternalPtrAddr(result);
 
-  /* Create pipes, if requested. */
-  if (cstdin && !strcmp(cstdin, "|")) processx__make_socketpair(pipes[0]);
-  if (cstdout && !strcmp(cstdout, "|")) processx__make_socketpair(pipes[1]);
-  if (cstderr && !strcmp(cstderr, "|")) processx__make_socketpair(pipes[2]);
+  if (cpty) {
+    pty_master_fd =
+      processx__pty_master_open(pty_name, R_PROCESSX_PTY_NAME_LEN);
+    if (pty_master_fd == -1) {
+      R_THROW_SYSTEM_ERROR("Cannot open pty");
+    }
+    options.pty_echo = LOGICAL(VECTOR_ELT(pty_options, 0))[0];
+
+  } else {
+    /* Create pipes, if requested. */
+    if (cstdin && !strcmp(cstdin, "|")) processx__make_socketpair(pipes[0]);
+    if (cstdout && !strcmp(cstdout, "|")) processx__make_socketpair(pipes[1]);
+    if (cstderr && !strcmp(cstderr, "|")) processx__make_socketpair(pipes[2]);
+  }
 
   for (i = 0; i < num_connections - 3; i++) {
     processx_connection_t *ccon =
       R_ExternalPtrAddr(VECTOR_ELT(connections, i));
     int fd = processx_c_connection_fileno(ccon);
-    processx__nonblock_fcntl(fd, 0);
     pipes[i + 3][1] = fd;
   }
 
@@ -360,17 +481,19 @@ SEXP processx_exec(SEXP command, SEXP args, SEXP std_in, SEXP std_out,
     err = -errno;
     if (signal_pipe[0] >= 0) close(signal_pipe[0]);
     if (signal_pipe[1] >= 0) close(signal_pipe[1]);
+    if (cpty) close(pty_master_fd);
     processx__unblock_sigchld();
-    PROCESSX__ERROR("Cannot fork", strerror(err));
+    R_THROW_SYSTEM_ERROR_CODE(err, "Cannot fork");
   }
 
   /* CHILD */
   if (pid == 0) {
     /* LCOV_EXCL_START */
+    if (cpty) close(pty_master_fd);
     processx__child_init(handle, pipes, num_connections, ccommand, cargs,
-			 signal_pipe[1], cstdin, cstdout, cstderr, cenv,
-			 &options, ctree_id);
-    PROCESSX__ERROR("Cannot start child process", "");
+			 signal_pipe[1], cstdin, cstdout, cstderr,
+                         pty_name, cenv, &options, ctree_id);
+    R_THROW_SYSTEM_ERROR("Cannot start child process");
     /* LCOV_EXCL_STOP */
   }
 
@@ -378,13 +501,16 @@ SEXP processx_exec(SEXP command, SEXP args, SEXP std_in, SEXP std_out,
      to avoid race conditions when sending signals */
   handle->create_time = processx__create_time(pid);
 
+  handle->ptyfd = -1;
+  if (cpty) handle->ptyfd = pty_master_fd;
+
   /* We need to know the processx children */
   if (processx__child_add(pid, result)) {
     err = -errno;
     if (signal_pipe[0] >= 0) close(signal_pipe[0]);
     if (signal_pipe[1] >= 0) close(signal_pipe[1]);
     processx__unblock_sigchld();
-    PROCESSX__ERROR("Cannot create child process", "out of memory");
+    R_THROW_ERROR("Cannot create child process, out of memory");
   }
 
   /* SIGCHLD can arrive now */
@@ -409,7 +535,8 @@ SEXP processx_exec(SEXP command, SEXP args, SEXP std_in, SEXP std_out,
     } while (err == -1 && errno == EINTR);
 
   } else {
-    PROCESSX__ERROR("Child process failed to start", strerror(exec_errorno));
+    R_THROW_SYSTEM_ERROR_CODE(-exec_errorno,
+                              "Child process failed to start");
   }
 
   if (signal_pipe[0] >= 0) close(signal_pipe[0]);
@@ -434,13 +561,6 @@ SEXP processx_exec(SEXP command, SEXP args, SEXP std_in, SEXP std_out,
     if (pipes[i][1] >= 0) close(pipes[i][1]);
   }
 
-  /* Close connections passed to the child process */
-  for (i = 3; i < num_connections; i++) {
-    processx_connection_t *ccon =
-      R_ExternalPtrAddr(VECTOR_ELT(connections, i - 3));
-    processx_c_connection_close(ccon);
-  }
-
   /* Create proper connections */
   processx__create_connections(handle, private, cencoding);
 
@@ -450,8 +570,8 @@ SEXP processx_exec(SEXP command, SEXP args, SEXP std_in, SEXP std_out,
     return result;
   }
 
-  error("processx error: '%s' at %s:%d", strerror(- exec_errorno),
-	__FILE__, __LINE__);
+  R_THROW_SYSTEM_ERROR_CODE(-exec_errorno, "cannot start processx process");
+  return R_NilValue;
 }
 
 void processx__collect_exit_status(SEXP status, int retval, int wstat) {
@@ -461,7 +581,7 @@ void processx__collect_exit_status(SEXP status, int retval, int wstat) {
      So we are not blocking it here. */
 
   if (!handle) {
-    error("Invalid handle, already finalized");
+    R_THROW_ERROR("Invalid handle, already finalized");
   }
 
   if (handle->collected) { return; }
@@ -533,7 +653,7 @@ SEXP processx_wait(SEXP status, SEXP timeout) {
   /* Setup the self-pipe that we can poll */
   if (pipe(handle->waitpipe)) {
     processx__unblock_sigchld();
-    error("processx error: %s", strerror(errno));
+    R_THROW_SYSTEM_ERROR("processx error");
   }
   processx__nonblock_fcntl(handle->waitpipe[0], 1);
   processx__nonblock_fcntl(handle->waitpipe[1], 1);
@@ -576,7 +696,7 @@ SEXP processx_wait(SEXP status, SEXP timeout) {
   }
 
   if (ret == -1) {
-    error("processx wait with timeout error: %s", strerror(errno));
+    R_THROW_SYSTEM_ERROR("processx wait with timeout error");
   }
 
  cleanup:
@@ -630,7 +750,7 @@ SEXP processx_is_alive(SEXP status) {
   /* Some other error? */
   if (wp == -1) {
     processx__unblock_sigchld();
-    error("processx_is_alive: %s", strerror(errno));
+    R_THROW_SYSTEM_ERROR("processx_is_alive");
   }
 
   /* If running, return TRUE, otherwise collect exit status, return FALSE */
@@ -685,7 +805,7 @@ SEXP processx_get_exit_status(SEXP status) {
   /* Some other error? */
   if (wp == -1) {
     processx__unblock_sigchld();
-    error("processx_get_exit_status: %s", strerror(errno));
+    R_THROW_SYSTEM_ERROR("processx_get_exit_status");
   }
 
   /* If running, do nothing otherwise collect */
@@ -741,7 +861,7 @@ SEXP processx_signal(SEXP status, SEXP signal) {
     result = 0;
   } else {
     processx__unblock_sigchld();
-    error("processx_signal: %s", strerror(errno));
+    R_THROW_SYSTEM_ERROR("processx_signal");
     return R_NilValue;
   }
 
@@ -758,7 +878,7 @@ SEXP processx_signal(SEXP status, SEXP signal) {
 
   if (wp == -1) {
     processx__unblock_sigchld();
-    error("processx_signal: %s", strerror(errno));
+    R_THROW_SYSTEM_ERROR("processx_signal");
   }
 
  cleanup:
@@ -809,7 +929,7 @@ SEXP processx_kill(SEXP status, SEXP grace) {
   /* Some other error? */
   if (wp == -1) {
     processx__unblock_sigchld();
-    error("processx_kill: %s", strerror(errno));
+    R_THROW_SYSTEM_ERROR("processx_kill");
   }
 
   /* If the process is not running, return (FALSE) */
@@ -820,7 +940,7 @@ SEXP processx_kill(SEXP status, SEXP grace) {
   if (ret == -1 && (errno == ESRCH || errno == EPERM)) { goto cleanup; }
   if (ret == -1) {
     processx__unblock_sigchld();
-    error("process_kill: %s", strerror(errno));
+    R_THROW_SYSTEM_ERROR("process_kill");
   }
 
   /* Do a waitpid to collect the status and reap the zombie */
@@ -863,7 +983,7 @@ SEXP processx__process_exists(SEXP pid) {
   } else if (errno == ESRCH) {
     return ScalarLogical(0);
   } else {
-    error("kill syscall error: %s", strerror(errno));
+    R_THROW_SYSTEM_ERROR("kill syscall error");
     return R_NilValue;
   }
 }

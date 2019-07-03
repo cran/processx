@@ -13,6 +13,7 @@ streams. The process id is then used to manage the process.
 \section{Usage}{
 \preformatted{p <- process$new(command = NULL, args,
                  stdin = NULL, stdout = NULL, stderr = NULL,
+                 pty = FALSE, pty_options = list(),
                  connections = list(), poll_connection = NULL,
                  env = NULL, cleanup = TRUE, cleanup_tree = FALSE,
                  wd = NULL, echo_cmd = FALSE, supervise = FALSE,
@@ -87,7 +88,7 @@ It should not be quoted with \code{\link[base:shQuote]{base::shQuote()}}. See
 used as is, without a shell. They don't need to be escaped.
 \item \code{stdin}: What to do with the standard input. Possible values:
 \code{NULL}: set to the \emph{null device}, i.e. no standard input is
-provided; a string, supply the specified string as standard input;
+provided; a file name, use this file as standard input;
 \code{"|"}: create a (writeable) connection for stdin.
 \item \code{stdout}: What to do with the standard output. Possible values:
 \code{NULL}: discard it; a string, redirect it to this file;
@@ -97,6 +98,22 @@ provided; a string, supply the specified string as standard input;
 \code{"|"}: create a connection for it; \code{"2>&1"}: redirect it to the
 same connection (i.e. pipe or file) as \code{stdout}. \code{"2>&1"} is a
 way to keep standard output and error correctly interleaved.
+\item \code{pty}: Whether to create a pseudo terminal (pty) for the background
+process. This is currently only supported on Unix systems, but
+not supported on Solaris.
+If it is \code{TRUE}, then the \code{stdin}, \code{stdout} and \code{stderr} arguments
+must be \code{NULL}. If a pseudo terminal is created, then processx
+will create pipes for standard input and standard output. There is
+no separate pipe for standard error, because there is no way to
+distinguish between stdout and stderr on a pty. Note that the
+standard output connection of the pty is \emph{blocking}, so we always
+poll the standard output connection before reading from it using
+the \code{$read_output()} method. Also, because \code{$read_output_lines()}
+could still block if no complete line is available, this function
+always fails if the process has a pty. Use \code{$read_output()} to
+read from ptys.
+\item \code{pty_options}: Unix pseudo terminal options, a named list. see
+\code{\link[=default_pty_options]{default_pty_options()}} for details and defaults.
 \item \code{connections}: A list of connections to pass to the child process.
 This is an experimental feature currently.
 \item \code{poll_connection}: Whether to create an extra connection to the process

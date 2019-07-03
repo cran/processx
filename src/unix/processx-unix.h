@@ -24,6 +24,7 @@ typedef struct processx_handle_s {
   int cleanup;
   double create_time;
   processx_connection_t *pipes[3];
+  int ptyfd;
 } processx_handle_t;
 
 char *processx__tmp_string(SEXP str, int i);
@@ -69,9 +70,6 @@ void processx__create_control_write(processx_handle_t *handle,
 
 int processx__interruptible_poll(struct pollfd fds[],
 				 nfds_t nfds, int timeout);
-
-#define PROCESSX__ERROR(msg1, msg2) \
-  error("%s %s at %s:%d", msg1, msg2, __FILE__,  __LINE__)
 
 void processx__make_socketpair(int pipe[2]);
 

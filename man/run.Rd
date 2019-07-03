@@ -10,7 +10,7 @@ run(command = NULL, args = character(), error_on_status = TRUE,
   stderr_line_callback = NULL, stderr_callback = NULL,
   stderr_to_stdout = FALSE, env = NULL,
   windows_verbatim_args = FALSE, windows_hide_window = FALSE,
-  encoding = "", cleanup_tree = FALSE)
+  encoding = "", cleanup_tree = FALSE, ...)
 }
 \arguments{
 \item{command}{Character scalar, the command to run.}
@@ -21,7 +21,7 @@ run(command = NULL, args = character(), error_on_status = TRUE,
 with a non-zero status, or it is interrupted. The error clases are
 \code{system_command_status_error} and \code{system_command_timeout_error},
 respectively, and both errors have class \code{system_command_error} as
-well.}
+well. See also "Error conditions" below.}
 
 \item{wd}{Working directory of the process. If \code{NULL}, the current
 working directory is used.}
@@ -79,6 +79,9 @@ both streams in UTF-8 currently.}
 
 \item{cleanup_tree}{Whether to clean up the child process tree after
 the process has finished.}
+
+\item{...}{Extra arguments are passed to \code{process$new()}, see
+\link{process}.}
 }
 \value{
 A list with components:
@@ -116,6 +119,34 @@ output or error line. The second argument is always the \link{process}
 object. You can manipulate this object, for example you can call
 \code{$kill()} on it to terminate it, as a response to a message on the
 standard output or error.
+}
+
+\section{Error conditions}{
+
+
+\code{run()} throws error condition objects if the process is interrupted,
+timeouts or fails (if \code{error_on_status} is \code{TRUE}):
+\itemize{
+\item On interrupt, a condition with classes \code{system_command_interrupt},
+\code{interrupt}, \code{condition} is signalled. This can be caught with
+\code{tryCatch(..., interrupt = ...)}.
+\item On timeout, a condition with classes \code{system_command_timeout_error},
+\code{system_command_error}, \code{error}, \code{condition} is thrown.
+\item On error (if \code{error_on_status} is \code{TRUE}), an error with classes
+\code{system_command_status_error}, \code{system_command_error}, \code{error},
+\code{condition} is thrown.
+}
+
+All of these conditions have the fields:
+\itemize{
+\item \code{message}: the error message,
+\item \code{stderr}: the standard error of the process, or the standard output
+of the process if \code{stderr_to_stdout} was \code{TRUE}.
+\item \code{call}: the captured call to \code{run()}.
+\item \code{echo}: the value of the \code{echo} argument.
+\item \code{stderr_to_stdout}: the value of the \code{stderr_to_stdout} argument.
+\item \code{status}: the exit status for \code{system_command_status_error} errors.
+}
 }
 
 \examples{

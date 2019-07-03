@@ -60,7 +60,7 @@ facilities, with a timeout.
 * Kill background processes and all their child processes.
 * Works on Linux, macOS and Windows.
 * Lightweight, it only depends on the also lightweight
-  R6, assertthat and crayon packages.
+  R6 and ps packages.
 
 ## Installation
 
@@ -682,7 +682,8 @@ p2$get_exit_status()
 
 ## Code of Conduct
 
-Please note that this project is released with a [Contributor Code of Conduct](CODE_OF_CONDUCT.md).
+Please note that this project is released with a
+[Contributor Code of Conduct](https://processx.r-lib.org/CODE_OF_CONDUCT.html).
 By participating in this project you agree to abide by its terms.
 
 ## License

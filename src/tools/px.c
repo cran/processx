@@ -1,4 +1,8 @@
 
+#ifndef _GNU_SOURCE
+#define _GNU_SOURCE 1
+#endif
+
 #if defined __INTEL_COMPILER
 #define _BSD_SOURCE 1
 #define _POSIX_C_SOURCE  200809L
@@ -25,6 +29,8 @@ void usage() {
 	  "print string to stdout, add newline\n");
   fprintf(stderr, "  errln  <string>            -- "
 	  "print string to stderr, add newline\n");
+  fprintf(stderr, "  errflush                   -- "
+	  "flush stderr stream\n");
   fprintf(stderr, "  cat    <filename>          -- "
 	  "print file to stdout\n");
   fprintf(stderr, "  return <exitcode>          -- "
@@ -52,7 +58,12 @@ void cat2(int f, const char *s) {
 }
 
 void cat(const char* filename) {
-  int f = open(filename, O_RDONLY);
+  int f;
+  if (!strcmp("<stdin>", filename)) {
+    f = STDIN_FILENO;
+  } else {
+    f = open(filename, O_RDONLY);
+  }
 
   if (f < 0) {
     fprintf(stderr, "can't open %s", filename);
@@ -131,6 +142,9 @@ int main(int argc, const char **argv) {
 
     } else if (!strcmp("errln", cmd)) {
       fprintf(stderr, "%s\n", argv[++idx]);
+
+    } else if (!strcmp("errflush", cmd)) {
+      fflush(stderr);
 
     } else if (!strcmp("cat", cmd)) {
       cat(argv[++idx]);

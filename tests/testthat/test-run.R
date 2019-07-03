@@ -95,3 +95,32 @@ test_that("stderr_to_stdout", {
   expect_equal(out$stderr, "")
   expect_false(out$timeout)
 })
+
+test_that("condition on interrupt", {
+  skip_if_no_ps()
+  skip_on_cran()
+  skip_on_appveyor() # TODO: why does this fail?
+
+  px <- get_tool("px")
+  cnd <- tryCatch(
+    interrupt_me(run(px, c("errln", "oops", "errflush", "sleep", 3)), 0.5),
+    error = function(c) c,
+    interrupt = function(c) c)
+
+  expect_s3_class(cnd, "system_command_interrupt")
+  expect_equal(str_trim(cnd$stderr), "oops")
+})
+
+test_that("stdin", {
+  tmp <- tempfile()
+  on.exit(unlink(tmp), add = TRUE)
+
+  txt <- "foobar\nthis is the input\n"
+  cat(txt, file = tmp)
+  px <- get_tool("px")
+  res <- run(px, c("cat", "<stdin>"), stdin = tmp)
+
+  expect_equal(
+    strsplit(res$stdout, "\r?\n")[[1]],
+    c("foobar", "this is the input"))
+})

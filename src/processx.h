@@ -6,12 +6,17 @@
 extern "C" {
 #endif
 
+#ifndef _GNU_SOURCE
+#define _GNU_SOURCE 1
+#endif
+
 #ifdef __INTEL_COMPILER
 #define _BSD_SOURCE 1
 #define _POSIX_C_SOURCE  200809L
 #endif
 
 #include "processx-connection.h"
+#include "errors.h"
 
 #ifdef _WIN32
 #include <windows.h>
@@ -38,8 +43,8 @@ extern "C" {
 /* API from R */
 
 SEXP processx_exec(SEXP command, SEXP args,
-		   SEXP std_in,  SEXP std_out, SEXP std_err,
-		   SEXP connections, SEXP env,
+		   SEXP std_in,  SEXP std_out, SEXP std_err, SEXP pty,
+		   SEXP pty_options, SEXP connections, SEXP env,
 		   SEXP windows_verbatim_args,
 		   SEXP windows_hide_window, SEXP private_, SEXP cleanup,
 		   SEXP wd, SEXP encoding, SEXP tree_id);
@@ -101,6 +106,7 @@ typedef struct {
   int windows_verbatim_args;
   int windows_hide;
   const char *wd;
+  int pty_echo;
 } processx_options_t;
 
 #ifdef __cplusplus

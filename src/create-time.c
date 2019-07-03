@@ -1,4 +1,8 @@
 
+#ifndef _GNU_SOURCE
+#define _GNU_SOURCE 1
+#endif
+
 #include <Rinternals.h>
 
 #include "processx.h"
@@ -260,7 +264,7 @@ SEXP processx__proc_start_time(SEXP status) {
   processx_handle_t *handle = R_ExternalPtrAddr(status);
 
   if (!handle) {
-    error("Internal processx error, handle already removed");
+    R_THROW_ERROR("Internal processx error, handle already removed");
   }
 
   return ScalarReal(handle->create_time);

@@ -2,6 +2,10 @@
 #ifndef PROCESSX_CONNECTION_H
 #define PROCESSX_CONNECTION_H
 
+#ifndef _GNU_SOURCE
+#define _GNU_SOURCE 1
+#endif
+
 #ifdef __INTEL_COMPILER
 #define _BSD_SOURCE 1
 #define _POSIX_C_SOURCE  200809L
@@ -16,6 +20,8 @@
 #else
 #include <unistd.h>
 #endif
+
+#include "errors.h"
 
 #include <Rinternals.h>
 #include <R_ext/Riconv.h>
@@ -260,10 +266,6 @@ BOOL processx__thread_getstatus_select(LPDWORD lpNumberOfBytes,
 DWORD processx__thread_get_last_error();
 
 #endif
-
-#define PROCESSX_ERROR(m,c) processx__error((m),(c),__FILE__,__LINE__)
-void processx__error(const char *message, DWORD errorcode,
-		     const char *file, int line);
 
 /* Free-list of connection in Windows */
 

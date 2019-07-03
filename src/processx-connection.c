@@ -52,16 +52,16 @@ static void processx__connection_find_utf8_chars(processx_connection_t *ccon,
 
 #ifdef _WIN32
 #define PROCESSX_CHECK_VALID_CONN(x) do {				\
-    if (!x) error("Invalid connection object");				\
+    if (!x) R_THROW_ERROR("Invalid connection object");                 \
     if (!(x)->handle.handle) {						\
-      error("Invalid (uninitialized or closed?) connection object");	\
+      R_THROW_ERROR("Invalid (uninitialized or closed?) connection object"); \
     }									\
   } while (0)
 #else
 #define PROCESSX_CHECK_VALID_CONN(x) do {				\
-    if (!x) error("Invalid connection object");				\
+    if (!x) R_THROW_ERROR("Invalid connection object");				\
     if ((x)->handle < 0) {                                              \
-      error("Invalid (uninitialized or closed?) connection object");	\
+      R_THROW_ERROR("Invalid (uninitialized or closed?) connection object");	\
 }                                                                       \
   } while (0)
 #endif
@@ -75,7 +75,7 @@ SEXP processx_connection_create(SEXP handle, SEXP encoding) {
   const char *c_encoding = CHAR(STRING_ELT(encoding, 0));
   SEXP result = R_NilValue;
 
-  if (!os_handle) error("Cannot create connection, invalid handle");
+  if (!os_handle) R_THROW_ERROR("Cannot create connection, invalid handle");
 
   processx_c_connection_create(*os_handle, PROCESSX_FILE_TYPE_ASYNCPIPE,
 			       c_encoding, &result);
@@ -125,7 +125,7 @@ SEXP processx_connection_create_file(SEXP filename, SEXP read, SEXP write) {
     /* dwFlagsAndAttributes = */ FILE_ATTRIBUTE_NORMAL,
     /* hTemplateFile = */ NULL);
   if (os_handle == INVALID_HANDLE_VALUE) {
-    PROCESSX_ERROR("Cannot open file", GetLastError());
+    R_THROW_SYSTEM_ERROR("Cannot open file");
   }
 
 #else
@@ -135,7 +135,7 @@ SEXP processx_connection_create_file(SEXP filename, SEXP read, SEXP write) {
   if ( c_read &&  c_write) flags |= O_RDWR;
   os_handle = open(c_filename, flags, 0644);
   if (os_handle == -1) {
-    error("Cannot open file `%s`: `%s`", c_filename, strerror(errno));
+    R_THROW_SYSTEM_ERROR("Cannot open file `%s`", c_filename);
   }
 #endif
 
@@ -222,32 +222,33 @@ SEXP processx_connection_write_bytes(SEXP con, SEXP bytes) {
 
 SEXP processx_connection_is_eof(SEXP con) {
   processx_connection_t *ccon = R_ExternalPtrAddr(con);
-  if (!ccon) error("Invalid connection object");
+  if (!ccon) R_THROW_ERROR("Invalid connection object");
   return ScalarLogical(ccon->is_eof_);
 }
 
 SEXP processx_connection_close(SEXP con) {
   processx_connection_t *ccon = R_ExternalPtrAddr(con);
-  if (!ccon) error("Invalid connection object");
+  if (!ccon) R_THROW_ERROR("Invalid connection object");
   processx_c_connection_close(ccon);
   return R_NilValue;
 }
 
 SEXP processx_connection_is_closed(SEXP con) {
   processx_connection_t *ccon = R_ExternalPtrAddr(con);
-  if (!ccon) error("Invalid connection object");
+  if (!ccon) R_THROW_ERROR("Invalid connection object");
   return ScalarLogical(processx_c_connection_is_closed(ccon));
 }
 
 /* Poll connections and other pollable handles */
 SEXP processx_connection_poll(SEXP pollables, SEXP timeout) {
   /* TODO: this is not used currently */
-  error("Not implemented");
+  R_THROW_ERROR("Not implemented");
   return R_NilValue;
 }
 
-SEXP processx_connection_create_pipepair(SEXP encoding) {
+SEXP processx_connection_create_pipepair(SEXP encoding, SEXP nonblocking) {
   const char *c_encoding = CHAR(STRING_ELT(encoding, 0));
+  int *c_nonblocking = LOGICAL(nonblocking);
   SEXP result, con1, con2;
 
 #ifdef _WIN32
@@ -257,17 +258,19 @@ SEXP processx_connection_create_pipepair(SEXP encoding) {
 #else
   int pipe[2], h1, h2;
   processx__make_socketpair(pipe);
-  processx__nonblock_fcntl(pipe[0], 1);
-  processx__nonblock_fcntl(pipe[1], 0);
+  processx__nonblock_fcntl(pipe[0], c_nonblocking[0]);
+  processx__nonblock_fcntl(pipe[1], c_nonblocking[1]);
   h1 = pipe[0];
   h2 = pipe[1];
 #endif
 
-  processx_c_connection_create(h1, PROCESSX_FILE_TYPE_ASYNCPIPE,
-			       c_encoding, &con1);
+  processx_c_connection_create(h1, c_nonblocking[0] ?
+    PROCESSX_FILE_TYPE_ASYNCPIPE : PROCESSX_FILE_TYPE_PIPE, c_encoding,
+    &con1);
   PROTECT(con1);
-  processx_c_connection_create(h2, PROCESSX_FILE_TYPE_ASYNCPIPE,
-			       c_encoding, &con2);
+  processx_c_connection_create(h2, c_nonblocking[1] ?
+    PROCESSX_FILE_TYPE_ASYNCPIPE : PROCESSX_FILE_TYPE_PIPE, c_encoding,
+    &con2);
   PROTECT(con2);
 
   result = PROTECT(allocVector(VECSXP, 2));
@@ -280,7 +283,7 @@ SEXP processx_connection_create_pipepair(SEXP encoding) {
 
 SEXP processx__connection_set_std(SEXP con, int which, int drop) {
   processx_connection_t *ccon = R_ExternalPtrAddr(con);
-  if (!ccon) error("Invalid connection object");
+  if (!ccon) R_THROW_ERROR("Invalid connection object");
   SEXP result = R_NilValue;
 
 #ifdef _WIN32
@@ -289,15 +292,16 @@ SEXP processx__connection_set_std(SEXP con, int which, int drop) {
     int saved = _dup(which);
     processx_file_handle_t os_handle;
     if (saved == -1) {
-      PROCESSX_ERROR("Cannot save stdout/stderr for rerouting", GetLastError());
+      R_THROW_SYSTEM_ERROR("Cannot save stdout/stderr for rerouting");
     }
     os_handle = (HANDLE) _get_osfhandle(saved) ;
     processx_c_connection_create(os_handle, PROCESSX_FILE_TYPE_PIPE,
 				 "", &result);
   }
+
   fd = _open_osfhandle((intptr_t) ccon->handle.handle, 0);
   ret = _dup2(fd, which);
-  if (ret) PROCESSX_ERROR("Cannot reroute stdout/stderr", GetLastError());
+  if (ret) R_THROW_SYSTEM_ERROR("Cannot reroute stdout/stderr");
 
 #else
   const char *what[] = { "stdin", "stdout", "stderr" };
@@ -305,14 +309,14 @@ SEXP processx__connection_set_std(SEXP con, int which, int drop) {
   if (!drop) {
     processx_file_handle_t os_handle = dup(which);
     if (os_handle == -1) {
-      error("Cannot save %s for rerouting: `%s`", what[which], strerror(errno));
+      R_THROW_SYSTEM_ERROR("Cannot save %s for rerouting", what[which]);
     }
     processx_c_connection_create(os_handle, PROCESSX_FILE_TYPE_PIPE,
 				 "", &result);
   }
   ret = dup2(ccon->handle, which);
   if (ret == -1) {
-    error("Cannot reroute %s: `%s`", what[which], strerror(errno));
+    R_THROW_SYSTEM_ERROR("Cannot reroute %s", what[which]);
   }
 #endif
 
@@ -329,7 +333,7 @@ SEXP processx_connection_set_stderr(SEXP con, SEXP drop) {
 
 SEXP processx_connection_get_fileno(SEXP con) {
   processx_connection_t *ccon = R_ExternalPtrAddr(con);
-  if (!ccon) error("Invalid connection object");
+  if (!ccon) R_THROW_ERROR("Invalid connection object");
   int fd;
 
 #ifdef _WIN32
@@ -408,7 +412,7 @@ processx_connection_t *processx_c_connection_create(
   SEXP result, class;
 
   con = malloc(sizeof(processx_connection_t));
-  if (!con) error("out of memory");
+  if (!con) R_THROW_ERROR("out of memory");
 
   con->type = type;
   con->is_closed_ = 0;
@@ -430,7 +434,7 @@ processx_connection_t *processx_c_connection_create(
     con->encoding = strdup(encoding);
     if (!con->encoding) {
       free(con);
-      error("out of memory");
+      R_THROW_ERROR("out of memory");
       return 0;			/* never reached */
     }
   }
@@ -499,7 +503,7 @@ ssize_t processx_c_connection_read_chars(processx_connection_t *ccon,
   size_t utf8_chars, utf8_bytes;
 
   if (nbyte < 4) {
-    error("Buffer size must be at least 4 bytes, to allow multibyte "
+    R_THROW_ERROR("Buffer size must be at least 4 bytes, to allow multibyte "
 	  "characters");
   }
 
@@ -535,8 +539,8 @@ ssize_t processx_c_connection_read_line(processx_connection_t *ccon,
   int eof = 0;
   ssize_t newline;
 
-  if (!linep) error("linep cannot be a null pointer");
-  if (!linecapp) error("linecapp cannot be a null pointer");
+  if (!linep) R_THROW_ERROR("linep cannot be a null pointer");
+  if (!linecapp) R_THROW_ERROR("linecapp cannot be a null pointer");
 
   if (ccon->is_eof_) return -1;
 
@@ -564,7 +568,7 @@ ssize_t processx_c_connection_read_line(processx_connection_t *ccon,
     *linecapp = newline + 1;
   } else if (*linecapp < newline + 1) {
     char *tmp = realloc(*linep, newline + 1);
-    if (!tmp) error("out of memory");
+    if (!tmp) R_THROW_ERROR("out of memory");
     *linep = tmp;
     *linecapp = newline + 1;
   }
@@ -598,7 +602,7 @@ ssize_t processx_c_connection_write_bytes(
     /* nNumberOfBytesToWrite =  */ nbytes,
     /* lpNumberOfBytesWritten = */ &written,
     /* lpOverlapped =           */ NULL);
-  if (!ret) PROCESSX_ERROR("Cannot write connection ", GetLastError());
+  if (!ret) R_THROW_SYSTEM_ERROR("Cannot write connection ");
   return (ssize_t) written;
 #else
   ssize_t ret = write(ccon->handle, buffer, nbytes);
@@ -606,8 +610,7 @@ ssize_t processx_c_connection_write_bytes(
     if (errno == EAGAIN || errno == EWOULDBLOCK) {
       return 0;
     } else {
-      error("Cannot write connection: %s at %s:%d", strerror(errno),
-	    __FILE__, __LINE__);
+      R_THROW_SYSTEM_ERROR("Cannot write connection");
     }
   }
   return ret;
@@ -833,7 +836,7 @@ int processx_c_connection_poll(processx_pollable_t pollables[],
 	hasdata++;
       }
     } else if (err != WAIT_TIMEOUT && err != ERROR_SUCCESS) {
-      PROCESSX_ERROR("Cannot poll", err);
+      R_THROW_SYSTEM_ERROR_CODE(err, "Cannot poll");
     }
 
     if (hasdata) break;
@@ -953,7 +956,7 @@ int processx_c_connection_poll(processx_pollable_t pollables[],
 				     hasdata > 0 ? 0 : timeout);
 
   if (ret == -1) {
-    error("Processx poll error: %s", strerror(errno));
+    R_THROW_SYSTEM_ERROR("Processx poll error");
 
   } else if (ret == 0) {
     if (hasdata == 0) {
@@ -1014,7 +1017,7 @@ void processx__connection_start_read(processx_connection_t *ccon) {
       ccon->handle.read_pending = TRUE;
     } else {
       ccon->handle.read_pending = FALSE;
-      PROCESSX_ERROR("reading from connection", err);
+      R_THROW_SYSTEM_ERROR_CODE(err, "reading from connection");
     }
   } else {
     /* Returned synchronously, but the event will be still signalled,
@@ -1252,14 +1255,14 @@ static ssize_t processx__connection_read_until_newline
 
 static void processx__connection_alloc(processx_connection_t *ccon) {
   ccon->buffer = malloc(64 * 1024);
-  if (!ccon->buffer) error("Cannot allocate memory for processx buffer");
+  if (!ccon->buffer) R_THROW_ERROR("Cannot allocate memory for processx buffer");
   ccon->buffer_allocated_size = 64 * 1024;
   ccon->buffer_data_size = 0;
 
   ccon->utf8 = malloc(64 * 1024);
   if (!ccon->utf8) {
     free(ccon->buffer);
-    error("Cannot allocate memory for processx buffer");
+    R_THROW_ERROR("Cannot allocate memory for processx buffer");
   }
   ccon->utf8_allocated_size = 64 * 1024;
   ccon->utf8_data_size = 0;
@@ -1273,7 +1276,7 @@ static void processx__connection_realloc(processx_connection_t *ccon) {
   void *nb;
   if (new_size == ccon->utf8_allocated_size) new_size = 2 * new_size;
   nb = realloc(ccon->utf8, new_size);
-  if (!nb) error("Cannot allocate memory for processx line");
+  if (!nb) R_THROW_ERROR("Cannot allocate memory for processx line");
   ccon->utf8 = nb;
   ccon->utf8_allocated_size = new_size;
 }
@@ -1340,7 +1343,7 @@ ssize_t processx__connection_read(processx_connection_t *ccon) {
 	}
 
       } else if (err != WAIT_TIMEOUT) {
-	PROCESSX_ERROR("Read error", err);
+	R_THROW_SYSTEM_ERROR_CODE(err, "Read error");
 
       } else {
 	break;
@@ -1384,7 +1387,7 @@ static ssize_t processx__connection_read(processx_connection_t *ccon) {
 
   } else if (bytes_read == -1) {
     /* Proper error  */
-    error("Cannot read from processx connection: %s", strerror(errno));
+    R_THROW_SYSTEM_ERROR("Cannot read from processx connection");
   }
 
   ccon->buffer_data_size += bytes_read;
@@ -1509,7 +1512,7 @@ static void processx__connection_find_utf8_chars(processx_connection_t *ccon,
   return;
 
  invalid:
-  error("Invalid UTF-8 string, internal error");
+  R_THROW_ERROR("Invalid UTF-8 string, internal error");
 }
 
 #ifndef _WIN32
@@ -1552,7 +1555,7 @@ int processx__connection_freelist_add(processx_connection_t *ccon) {
   if (ccon->handle.freelist) return 0;
   processx__connection_freelist_t *node =
     calloc(1, sizeof(processx__connection_freelist_t));
-  if (!node) error("Cannot add to connection freelist, this is a leak");
+  if (!node) R_THROW_ERROR("Cannot add to connection freelist, this is a leak");
 
   node->ccon = ccon;
   node->next = freelist->next;
