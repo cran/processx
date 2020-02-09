@@ -47,7 +47,7 @@
 #' @param command Character scalar, the command to run.
 #' @param args Character vector, arguments to the command.
 #' @param error_on_status Whether to throw an error if the command returns
-#'   with a non-zero status, or it is interrupted. The error clases are
+#'   with a non-zero status, or it is interrupted. The error classes are
 #'   `system_command_status_error` and `system_command_timeout_error`,
 #'   respectively, and both errors have class `system_command_error` as
 #'   well. See also "Error conditions" below.
@@ -103,25 +103,22 @@
 #'   * timeout Whether the process was killed because of a timeout.
 #'
 #' @export
-#' @examples
-#' ## Different examples for Unix and Windows
-#' \dontrun{
-#' if (.Platform$OS.type == "unix") {
-#'   run("ls")
-#'   system.time(run("sleep", "10", timeout = 1,
-#'     error_on_status = FALSE))
-#'   system.time(
-#'     run(
-#'       "sh", c("-c", "for i in 1 2 3 4 5; do echo $i; sleep 1; done"),
-#'       timeout = 2, error_on_status = FALSE
-#'     )
+#' @examplesIf .Platform$OS.type == "unix"
+#' # This works on Unix systems
+#' run("ls")
+#' system.time(run("sleep", "10", timeout = 1, error_on_status = FALSE))
+#' system.time(
+#'   run(
+#'     "sh", c("-c", "for i in 1 2 3 4 5; do echo $i; sleep 1; done"),
+#'     timeout = 2, error_on_status = FALSE
 #'   )
-#' } else {
-#'   run("ping", c("-n", "1", "127.0.0.1"))
-#'   run("ping", c("-n", "6", "127.0.0.1"), timeout = 1,
+#' )
+#'
+#' @examplesIf FALSE
+#' # This works on Windows systems, if the ping command is available
+#' run("ping", c("-n", "1", "127.0.0.1"))
+#' run("ping", c("-n", "6", "127.0.0.1"), timeout = 1,
 #'     error_on_status = FALSE)
-#' }
-#' }
 
 run <- function(
   command = NULL, args = character(), error_on_status = TRUE, wd = NULL,
@@ -187,7 +184,7 @@ run <- function(
       tryCatch(pr$kill(), error = function(e) NULL)
       signalCondition(new_process_interrupt_cond(
         list(interrupt = TRUE, stderr = resenv$stderr,
-             stdout = resenv$stdout),
+             stdout = resenv$stdout, command = command, args = args),
         runcall, echo = echo, stderr_to_stdout = stderr_to_stdout
       ))
       cat("\n")
@@ -198,7 +195,8 @@ run <- function(
   if (error_on_status && (is.na(res$status) || res$status != 0)) {
     "!DEBUG run() error on status `res$status` for process `pr$get_pid()`"
     throw(new_process_error(res, call = sys.call(), echo = echo,
-                            stderr_to_stdout, res$status))
+                            stderr_to_stdout, res$status, command = command,
+                            args = args))
   }
 
   res
@@ -277,10 +275,11 @@ run_manage <- function(proc, timeout, spinner, stdout_line_callback,
 
   spin <- (function() {
     state <- 1L
-    phases <- c("-", "\\", "|", "-")
+    phases <- c("-", "\\", "|", "/")
     function() {
       cat("\r", phases[state], "\r", sep = "")
-      state <<- (state + 1) %% length(phases) + 1L
+      state <<- state %% length(phases) + 1L
+      utils::flush.console()
     }
   })()
 
@@ -337,17 +336,22 @@ run_manage <- function(proc, timeout, spinner, stdout_line_callback,
 }
 
 new_process_error <- function(result, call, echo, stderr_to_stdout,
-                              status = NA_integer_) {
+                              status = NA_integer_, command, args) {
   if (isTRUE(result$timeout)) {
-    new_process_timeout_error(result, call, echo, stderr_to_stdout, status)
+    new_process_timeout_error(result, call, echo, stderr_to_stdout, status,
+                              command, args)
   } else {
-    new_process_status_error(result, call, echo, stderr_to_stdout, status)
+    new_process_status_error(result, call, echo, stderr_to_stdout, status,
+                             command, args)
   }
 }
 
 new_process_status_error <- function(result, call, echo, stderr_to_stdout,
-                                     status = NA_integer_) {
-  err <- new_error("System command error", call. = call)
+                                     status = NA_integer_, command, args) {
+  err <- new_error(
+    "System command '", basename(command), "' failed",
+    call. = call
+  )
   err$stderr <- if (stderr_to_stdout) result$stdout else result$stderr
   err$echo <- echo
   err$stderr_to_stdout <- stderr_to_stdout
@@ -358,7 +362,10 @@ new_process_status_error <- function(result, call, echo, stderr_to_stdout,
 
 new_process_interrupt_cond <- function(result, call, echo, stderr_to_stdout,
                                       status = NA_integer_) {
-  cond <- new_cond("System command interrupted", call. = call)
+  cond <- new_cond(
+    "System command '", basename(result$command), "' interrupted",
+    call. = call
+  )
   cond$stderr <- if (stderr_to_stdout) result$stdout else result$stderr
   cond$echo <- echo
   cond$stderr_to_stdout <- stderr_to_stdout
@@ -368,8 +375,9 @@ new_process_interrupt_cond <- function(result, call, echo, stderr_to_stdout,
 }
 
 new_process_timeout_error <- function(result, call, echo, stderr_to_stdout,
-                                      status = NA_integer_) {
-  err <- new_error("System command timeout", call. = call)
+                                      status = NA_integer_, command, args) {
+  err <- new_error(
+    "System command '", basename(command), "' timed out", call. = call)
   err$stderr <- if (stderr_to_stdout) result$stdout else result$stderr
   err$echo <- echo
   err$stderr_to_stdout <- stderr_to_stdout
@@ -380,24 +388,45 @@ new_process_timeout_error <- function(result, call, echo, stderr_to_stdout,
 
 #' @export
 
-conditionMessage.system_command_status_error <- function(c) {
-  std <- if (c$stderr_to_stdout) "stdout + stderr" else "stderr"
-  exit <- if (!is.na(c$status)) paste0(", exit status: ", c$status)
-  res <- if (c$echo) {
-    paste0(c$message, exit, ", see stdout + stderr above")
+conditionMessage.system_command_error <- function(c) {
+  paste(format(c), collapse = "\n")
+}
+
+#' @export
+
+format.system_command_error <- function(x, ...) {
+  parts <- system_error_parts(x)
+}
+
+#' @export
+
+print.system_command_error <- function(x, ...) {
+  cat(format(x, ...), sep = "\n")
+}
+
+system_error_parts <- function(x) {
+  exit <- if (!is.na(x$status)) paste0(", exit status: ", x$status)
+  msg <- paste0(x$message, exit)
+  parts <- if (x$echo) {
+    paste0(msg, ", stdout & stderr were printed")
   } else {
-    paste0(c$message, exit, last_stderr_lines(c$stderr, std))
+    std <- if (x$stderr_to_stdout) "stdout + stderr" else "stderr"
+    out <- last_stderr_lines(x$stderr, std)
+    c(paste0(msg, out[1]), out[-1])
   }
-  NextMethod("conditionMessage")
-  res
 }
 
 last_stderr_lines <- function(text, std) {
   if (!nzchar(text)) return(paste0(", ", std, " empty"))
   lines <- strsplit(text, "\r?\n")[[1]]
-  pref <- paste0(
-    ", ", std, if (length(lines) > 10) " (last 10 lines)", ":\n")
-  out <- paste("E>", utils::tail(lines, 10), collapse = "\n")
-  if (has_package("crayon")) out <- crayon::red(out)
-  paste0(pref, out)
+
+  if (is_interactive()) {
+    pref <- paste0(
+      ", ", std, if (length(lines) > 10) " (last 10 lines)", ":")
+    out <- paste0("E> ", utils::tail(lines, 10))
+    c(pref, out)
+  } else {
+    out <- paste0("E> ", lines)
+    c(paste0(", ", std, ":"), out)
+  }
 }

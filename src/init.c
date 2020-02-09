@@ -1,5 +1,6 @@
 
 #include "processx.h"
+#include "cleancall.h"
 
 #include <R_ext/Rdynload.h>
 #include <R.h>
@@ -12,13 +13,14 @@ SEXP processx__echo_on();
 SEXP processx__echo_off();
 
 static const R_CallMethodDef callMethods[]  = {
+  CLEANCALL_METHOD_RECORD,
   { "processx_exec",               (DL_FUNC) &processx_exec,              16 },
-  { "processx_wait",               (DL_FUNC) &processx_wait,               2 },
-  { "processx_is_alive",           (DL_FUNC) &processx_is_alive,           1 },
-  { "processx_get_exit_status",    (DL_FUNC) &processx_get_exit_status,    1 },
-  { "processx_signal",             (DL_FUNC) &processx_signal,             2 },
-  { "processx_interrupt",          (DL_FUNC) &processx_interrupt,          1 },
-  { "processx_kill",               (DL_FUNC) &processx_kill,               2 },
+  { "processx_wait",               (DL_FUNC) &processx_wait,               3 },
+  { "processx_is_alive",           (DL_FUNC) &processx_is_alive,           2 },
+  { "processx_get_exit_status",    (DL_FUNC) &processx_get_exit_status,    2 },
+  { "processx_signal",             (DL_FUNC) &processx_signal,             3 },
+  { "processx_interrupt",          (DL_FUNC) &processx_interrupt,          2 },
+  { "processx_kill",               (DL_FUNC) &processx_kill,               3 },
   { "processx_get_pid",            (DL_FUNC) &processx_get_pid,            1 },
   { "processx_create_time",        (DL_FUNC) &processx_create_time,        1 },
   { "processx_poll",               (DL_FUNC) &processx_poll,               3 },
@@ -62,6 +64,7 @@ void R_init_processx(DllInfo *dll) {
   R_registerRoutines(dll, NULL, callMethods, NULL, NULL);
   R_useDynamicSymbols(dll, FALSE);
   R_forceSymbols(dll, TRUE);
+  cleancall_fns_dot_call = Rf_findVar(Rf_install(".Call"), R_BaseEnv);
 #ifdef _WIN32
   R_init_processx_win();
 #else

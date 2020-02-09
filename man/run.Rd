@@ -4,13 +4,27 @@
 \alias{run}
 \title{Run external command, and wait until finishes}
 \usage{
-run(command = NULL, args = character(), error_on_status = TRUE,
-  wd = NULL, echo_cmd = FALSE, echo = FALSE, spinner = FALSE,
-  timeout = Inf, stdout_line_callback = NULL, stdout_callback = NULL,
-  stderr_line_callback = NULL, stderr_callback = NULL,
-  stderr_to_stdout = FALSE, env = NULL,
-  windows_verbatim_args = FALSE, windows_hide_window = FALSE,
-  encoding = "", cleanup_tree = FALSE, ...)
+run(
+  command = NULL,
+  args = character(),
+  error_on_status = TRUE,
+  wd = NULL,
+  echo_cmd = FALSE,
+  echo = FALSE,
+  spinner = FALSE,
+  timeout = Inf,
+  stdout_line_callback = NULL,
+  stdout_callback = NULL,
+  stderr_line_callback = NULL,
+  stderr_callback = NULL,
+  stderr_to_stdout = FALSE,
+  env = NULL,
+  windows_verbatim_args = FALSE,
+  windows_hide_window = FALSE,
+  encoding = "",
+  cleanup_tree = FALSE,
+  ...
+)
 }
 \arguments{
 \item{command}{Character scalar, the command to run.}
@@ -18,7 +32,7 @@ run(command = NULL, args = character(), error_on_status = TRUE,
 \item{args}{Character vector, arguments to the command.}
 
 \item{error_on_status}{Whether to throw an error if the command returns
-with a non-zero status, or it is interrupted. The error clases are
+with a non-zero status, or it is interrupted. The error classes are
 \code{system_command_status_error} and \code{system_command_timeout_error},
 respectively, and both errors have class \code{system_command_error} as
 well. See also "Error conditions" below.}
@@ -117,7 +131,7 @@ Some notes about the callback functions. The first argument of a
 callback function is a character scalar (length 1 character), a single
 output or error line. The second argument is always the \link{process}
 object. You can manipulate this object, for example you can call
-\code{$kill()} on it to terminate it, as a response to a message on the
+\verb{$kill()} on it to terminate it, as a response to a message on the
 standard output or error.
 }
 
@@ -150,22 +164,21 @@ of the process if \code{stderr_to_stdout} was \code{TRUE}.
 }
 
 \examples{
-## Different examples for Unix and Windows
-\dontrun{
-if (.Platform$OS.type == "unix") {
-  run("ls")
-  system.time(run("sleep", "10", timeout = 1,
-    error_on_status = FALSE))
-  system.time(
-    run(
-      "sh", c("-c", "for i in 1 2 3 4 5; do echo $i; sleep 1; done"),
-      timeout = 2, error_on_status = FALSE
-    )
+\dontshow{if (.Platform$OS.type == "unix") (if (getRversion() >= "3.4") withAutoprint else force)(\{ # examplesIf}
+# This works on Unix systems
+run("ls")
+system.time(run("sleep", "10", timeout = 1, error_on_status = FALSE))
+system.time(
+  run(
+    "sh", c("-c", "for i in 1 2 3 4 5; do echo $i; sleep 1; done"),
+    timeout = 2, error_on_status = FALSE
   )
-} else {
-  run("ping", c("-n", "1", "127.0.0.1"))
-  run("ping", c("-n", "6", "127.0.0.1"), timeout = 1,
+)
+\dontshow{\}) # examplesIf}
+\dontshow{if (FALSE) (if (getRversion() >= "3.4") withAutoprint else force)(\{ # examplesIf}
+# This works on Windows systems, if the ping command is available
+run("ping", c("-n", "1", "127.0.0.1"))
+run("ping", c("-n", "6", "127.0.0.1"), timeout = 1,
     error_on_status = FALSE)
-}
-}
+\dontshow{\}) # examplesIf}
 }
