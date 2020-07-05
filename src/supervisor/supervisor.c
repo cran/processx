@@ -349,6 +349,7 @@ int main(int argc, char **argv) {
     #else
 
     struct sigaction sa;
+    memset(&sa, 0, sizeof(sa));
     sa.sa_handler = sig_handler;
     sigemptyset(&sa.sa_mask);
     if (sigaction(SIGINT, &sa, NULL)  == -1 ||
