@@ -6,7 +6,7 @@
 > Execute and Control System Processes
 
 <!-- badges: start -->
-[![lifecycle](https://img.shields.io/badge/lifecycle-maturing-blue.svg)](https://tidyverse.org/lifecycle/#maturing)
+[![lifecycle](https://img.shields.io/badge/lifecycle-maturing-blue.svg)](https://www.tidyverse.org/lifecycle/#maturing)
 [![Linux Build Status](https://travis-ci.org/r-lib/processx.svg?branch=master)](https://travis-ci.org/r-lib/processx)
 [![Windows Build status](https://ci.appveyor.com/api/projects/status/15sfg3l9mm4aseyf/branch/master?svg=true)](https://ci.appveyor.com/project/gaborcsardi/processx)
 [![](https://www.r-pkg.org/badges/version/processx)](https://www.r-pkg.org/pkg/processx)
@@ -702,7 +702,7 @@ p2$get_exit_status()
 
 ## Related tools
 
-* The [`ps` package](http://ps.r-lib.org/) can query, list, manipulate
+* The [`ps` package](https://ps.r-lib.org/) can query, list, manipulate
   all system processes (not just subprocesses), and processx uses it
   internally for some of its functionality. You can also convert a
   `processx::process` object to a `ps::ps_handle` with the `as_ps_handle()`
