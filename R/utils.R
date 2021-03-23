@@ -250,3 +250,31 @@ is_interactive <- function() {
     interactive()
   }
 }
+
+make_buffer <- function() {
+  con <- file(open = "w+b")
+  size <- 0L
+  list(
+    push = function(text) {
+      size <<- size + nchar(text)
+      cat(text, file = con)
+    },
+    read = function() {
+      readChar(con, size, useBytes = TRUE)
+    },
+    done = function() {
+      close(con)
+    }
+  )
+}
+
+update_vector <- function(x, y = NULL) {
+  if (length(y) == 0L) return(x)
+  c(x[!(names(x) %in% names(y))], y)
+}
+
+process_env <- function(env) {
+  current <- env == "current" & names(env) == ""
+  if (any(current)) env <- update_vector(Sys.getenv(), env[!current])
+  enc2utf8(paste(names(env), sep = "=", env))
+}

@@ -142,6 +142,7 @@ Start a new process in the background, and then return immediately.
   supervise = FALSE,
   windows_verbatim_args = FALSE,
   windows_hide_window = FALSE,
+  windows_detached_process = !cleanup,
   encoding = "",
   post_process = NULL
 )}\if{html}{\out{</div>}}
@@ -166,6 +167,9 @@ They don't need to be escaped.}
 provided;
 \item a file name, use this file as standard input;
 \item \code{"|"}: create a (writeable) connection for stdin.
+\item \code{""} (empty string): inherit it from the main R process. If the
+main R process does not have a standard input stream, e.g. in
+RGui on Windows, then an error is thrown.
 }}
 
 \item{\code{stdout}}{What to do with the standard output. Possible values:
@@ -173,6 +177,9 @@ provided;
 \item \code{NULL}: discard it;
 \item a string, redirect it to this file;
 \item \code{"|"}: create a connection for it.
+\item \code{""} (empty string): inherit it from the main R process. If the
+main R process does not have a standard output stream, e.g. in
+RGui on Windows, then an error is thrown.
 }}
 
 \item{\code{stderr}}{What to do with the standard error. Possible values:
@@ -183,6 +190,9 @@ provided;
 \item \code{"2>&1"}: redirect it to the same connection (i.e. pipe or file)
 as \code{stdout}. \code{"2>&1"} is a way to keep standard output and error
 correctly interleaved.
+\item \code{""} (empty string): inherit it from the main R process. If the
+main R process does not have a standard error stream, e.g. in
+RGui on Windows, then an error is thrown.
 }}
 
 \item{\code{pty}}{Whether to create a pseudo terminal (pty) for the
@@ -222,7 +232,10 @@ the parent's environment is inherited. On Windows, many programs
 cannot function correctly if some environment variables are not
 set, so we always set \code{HOMEDRIVE}, \code{HOMEPATH}, \code{LOGONSERVER},
 \code{PATH}, \code{SYSTEMDRIVE}, \code{SYSTEMROOT}, \code{TEMP}, \code{USERDOMAIN},
-\code{USERNAME}, \code{USERPROFILE} and \code{WINDIR}.}
+\code{USERNAME}, \code{USERPROFILE} and \code{WINDIR}. To append new environment
+variables to the ones set in the current process, specify
+\code{"current"} in \code{env}, without a name, and the appended ones with
+names. The appended ones can overwrite the current ones.}
 
 \item{\code{cleanup}}{Whether to kill the process when the \code{process}
 object is garbage collected.}
@@ -245,6 +258,11 @@ on Windows. It is ignored on other platforms.}
 
 \item{\code{windows_hide_window}}{Whether to hide the application's window
 on Windows. It is ignored on other platforms.}
+
+\item{\code{windows_detached_process}}{Whether to use the
+\code{DETACHED_PROCESS} flag on Windows. If this is \code{TRUE}, then
+the child process will have no attached console, even if the
+parent had one.}
 
 \item{\code{encoding}}{The encoding to assume for \code{stdin}, \code{stdout} and
 \code{stderr}. By default the encoding of the current locale is
@@ -692,7 +710,7 @@ standard error stream of the process.
 \verb{$read_all_output()} waits for all standard output from the process.
 It does not return until the process has finished.
 Note that this process involves waiting for the process to finish,
-polling for I/O and potentically several \code{readLines()} calls.
+polling for I/O and potentially several \code{readLines()} calls.
 It returns a character scalar. This will return content only if
 \code{stdout="|"} was used. Otherwise, it will throw an error.
 \subsection{Usage}{
@@ -707,7 +725,7 @@ It returns a character scalar. This will return content only if
 \verb{$read_all_error()} waits for all standard error from the process.
 It does not return until the process has finished.
 Note that this process involves waiting for the process to finish,
-polling for I/O and potentically several \code{readLines()} calls.
+polling for I/O and potentially several \code{readLines()} calls.
 It returns a character scalar. This will return content only if
 \code{stderr="|"} was used. Otherwise, it will throw an error.
 \subsection{Usage}{
@@ -722,7 +740,7 @@ It returns a character scalar. This will return content only if
 \verb{$read_all_output_lines()} waits for all standard output lines
 from a process. It does not return until the process has finished.
 Note that this process involves waiting for the process to finish,
-polling for I/O and potentically several \code{readLines()} calls.
+polling for I/O and potentially several \code{readLines()} calls.
 It returns a character vector. This will return content only if
 \code{stdout="|"} was used. Otherwise, it will throw an error.
 \subsection{Usage}{
@@ -737,7 +755,7 @@ It returns a character vector. This will return content only if
 \verb{$read_all_error_lines()} waits for all standard error lines from
 a process. It does not return until the process has finished.
 Note that this process involves waiting for the process to finish,
-polling for I/O and potentically several \code{readLines()} calls.
+polling for I/O and potentially several \code{readLines()} calls.
 It returns a character vector. This will return content only if
 \code{stderr="|"} was used. Otherwise, it will throw an error.
 \subsection{Usage}{

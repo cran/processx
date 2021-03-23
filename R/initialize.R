@@ -27,27 +27,29 @@ process_initialize <- function(self, private, command, args,
                                connections, poll_connection, env, cleanup,
                                cleanup_tree, wd, echo_cmd, supervise,
                                windows_verbatim_args, windows_hide_window,
-                               encoding, post_process) {
+                               windows_detached_process, encoding,
+                               post_process) {
 
   "!DEBUG process_initialize `command`"
 
   assert_that(
     is_string(command),
     is.character(args),
-    is_string_or_null(stdin),
-    is_string_or_null(stdout),
-    is_string_or_null(stderr),
+    is_std_conn(stdin),
+    is_std_conn(stdout),
+    is_std_conn(stderr),
     is_flag(pty),
     is.list(pty_options), is_named(pty_options),
     is_connection_list(connections),
     is.null(poll_connection) || is_flag(poll_connection),
-    is.null(env) || is_named_character(env),
+    is.null(env) || is_env_vector(env),
     is_flag(cleanup),
     is_flag(cleanup_tree),
     is_string_or_null(wd),
     is_flag(echo_cmd),
     is_flag(windows_verbatim_args),
     is_flag(windows_hide_window),
+    is_flag(windows_detached_process),
     is_string(encoding),
     is.function(post_process) || is.null(post_process))
 
@@ -115,19 +117,22 @@ process_initialize <- function(self, private, command, args,
 
   if (echo_cmd) do_echo_cmd(command, args)
 
-  if (!is.null(env)) env <- enc2utf8(paste(names(env), sep = "=", env))
+  if (!is.null(env)) env <- process_env(env)
 
   private$tree_id <- get_id()
 
-  "!DEBUG process_initialize exec()"
   if (!is.null(wd)) {
     wd <- normalizePath(wd, winslash = "\\", mustWork = FALSE)
   }
+
+  connections <- c(list(stdin, stdout, stderr), connections)
+
+  "!DEBUG process_initialize exec()"
   private$status <- rethrow_call(
     c_processx_exec,
-    command, c(command, args), stdin, stdout, stderr, pty, pty_options,
+    command, c(command, args), pty, pty_options,
     connections, env, windows_verbatim_args, windows_hide_window,
-    private, cleanup, wd, encoding,
+    windows_detached_process, private, cleanup, wd, encoding,
     paste0("PROCESSX_", private$tree_id, "=YES")
   )
 
@@ -146,11 +151,11 @@ process_initialize <- function(self, private, command, args,
   ## poll it.
   if (poll_connection) close(pipe[[2]])
 
-  if (is.character(stdin) && stdin != "|")
+  if (is.character(stdin) && stdin != "|" && stdin != "")
     stdin <- full_path(stdin)
-  if (is.character(stdout) && stdout != "|")
+  if (is.character(stdout) && stdout != "|" && stdout != "")
     stdout <- full_path(stdout)
-  if (is.character(stderr) && stderr != "|")
+  if (is.character(stderr) && stderr != "|" && stderr != "")
     stderr <- full_path(stderr)
 
   ## Store the output and error files, we'll open them later if needed
