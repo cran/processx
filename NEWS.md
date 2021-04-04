@@ -1,7 +1,8 @@
+# processx 3.5.1
+
+* Fix a potential failure when polling curl file descriptors on Windows.
+
 # processx 3.5.0
-
-
-# processx development version
 
 * You can now append environment variables to the ones set in the current
   process if you include `"current"` in the value of `env`, in `run()`
