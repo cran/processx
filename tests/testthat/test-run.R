@@ -1,6 +1,4 @@
 
-context("run")
-
 test_that("run can run", {
 
   px <- get_tool("px")
@@ -92,14 +90,16 @@ test_that("stderr_to_stdout", {
   expect_equal(out$status, 0L)
   expect_equal(
     out$stdout, paste0("o1e1o2e2", if (is_windows()) "\r", "\n"))
-  expect_equal(out$stderr, "")
+  expect_equal(out$stderr, NULL)
   expect_false(out$timeout)
 })
 
 test_that("condition on interrupt", {
   skip_if_no_ps()
   skip_on_cran()
-  skip_on_appveyor() # TODO: why does this fail?
+  if (is_windows() && Sys.getenv("_R_CHECK_PACKAGE_NAME_", "") != "") {
+    skip("Fails in Windows R CMD check")
+  }
 
   px <- get_tool("px")
   cnd <- tryCatch(

@@ -16,10 +16,18 @@ Running Windows batch files (\code{.bat} or \code{.cmd} files) may be complicate
 because of the \code{cmd.exe} command line parsing rules. For example you
 cannot easily have whitespace in both the command (path) and one of the
 arguments. To work around these limitations you need to start a
-\code{cmd.exe} shell explicitly and use its \code{call} command. For example:\if{html}{\out{<div class="r">}}\preformatted{process$new("cmd.exe", c("/c", "call", bat_file, "arg 1", "arg 2"))
+\code{cmd.exe} shell explicitly and use its \code{call} command. For example:\if{html}{\out{<div class="sourceCode r">}}\preformatted{process$new("cmd.exe", c("/c", "call", bat_file, "arg 1", "arg 2"))
 }\if{html}{\out{</div>}}
 
 This works even if \code{bat_file} contains whitespace characters.
+For more information about this, see this processx issue:
+https://github.com/r-lib/processx/issues/301
+
+The detailed parsing rules are at
+https://docs.microsoft.com/en-us/windows-server/administration/windows-commands/cmd
+
+A very good practical guide is at
+https://ss64.com/nt/syntax-esc.html
 }
 
 \section{Polling}{
@@ -43,7 +51,7 @@ also set to \code{TRUE}).
 The cleanup happens when the references of the processes object are
 garbage collected. To clean up earlier, you can call the \code{kill()} or
 \code{kill_tree()} method of the process(es), from an \code{on.exit()} expression,
-or an error handler:\if{html}{\out{<div class="r">}}\preformatted{process_manager <- function() \{
+or an error handler:\if{html}{\out{<div class="sourceCode r">}}\preformatted{process_manager <- function() \{
   on.exit(\{
     try(p1$kill(), silent = TRUE)
     try(p2$kill(), silent = TRUE)
@@ -189,7 +197,10 @@ RGui on Windows, then an error is thrown.
 \item{\code{stdout}}{What to do with the standard output. Possible values:
 \itemize{
 \item \code{NULL}: discard it;
-\item a string, redirect it to this file;
+\item A string, redirect it to this file.
+Note that if you specify a relative path, it will be relative to
+the current working directory, even if you specify another
+directory in the \code{wd} argument. (See issue 324.)
 \item \code{"|"}: create a connection for it.
 \item \code{""} (empty string): inherit it from the main R process. If the
 main R process does not have a standard output stream, e.g. in
@@ -198,9 +209,12 @@ RGui on Windows, then an error is thrown.
 
 \item{\code{stderr}}{What to do with the standard error. Possible values:
 \itemize{
-\item \code{NULL}: discard it;
-\item a string, redirect it to this file;
-\item \code{"|"}: create a connection for it;
+\item \code{NULL}: discard it.
+\item A string, redirect it to this file.
+Note that if you specify a relative path, it will be relative to
+the current working directory, even if you specify another
+directory in the \code{wd} argument. (See issue 324.)
+\item \code{"|"}: create a connection for it.
 \item \code{"2>&1"}: redirect it to the same connection (i.e. pipe or file)
 as \code{stdout}. \code{"2>&1"} is a way to keep standard output and error
 correctly interleaved.

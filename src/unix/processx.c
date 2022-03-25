@@ -50,6 +50,7 @@ extern char **environ;
 
 #include <termios.h>
 #include <sys/ioctl.h>
+#include <pthread.h>
 
 extern processx__child_list_t child_list_head;
 extern processx__child_list_t *child_list;
@@ -63,6 +64,8 @@ extern int processx__notify_old_sigchld_handler;
    This function is called from `R_init_processx`. */
 
 void R_init_processx_unix() {
+  processx__main_thread = pthread_self();
+
   child_list_head.pid = 0;
   child_list_head.weak_status = R_NilValue;
   child_list_head.next = 0;
@@ -78,31 +81,31 @@ void R_init_processx_unix() {
   }
 }
 
-int processx__pty_master_open(char *sub_name, size_t sn_len) {
-  int master_fd, saved_errno;
+int processx__pty_main_open(char *sub_name, size_t sn_len) {
+  int main_fd, saved_errno;
   char *p;
 
-  master_fd = posix_openpt(O_RDWR | O_NOCTTY);
-  if (master_fd == -1) return -1;
+  main_fd = posix_openpt(O_RDWR | O_NOCTTY);
+  if (main_fd == -1) return -1;
 
-  if (grantpt(master_fd) == -1) {
+  if (grantpt(main_fd) == -1) {
     saved_errno = errno;
-    close(master_fd);
+    close(main_fd);
     errno = saved_errno;
     return -1;
   }
 
-  if (unlockpt(master_fd) == -1) {
+  if (unlockpt(main_fd) == -1) {
     saved_errno = errno;
-    close(master_fd);
+    close(main_fd);
     errno = saved_errno;
     return -1;
   }
 
-  p = ptsname(master_fd);
+  p = ptsname(main_fd);
   if (p == NULL) {
     saved_errno = errno;
-    close(master_fd);
+    close(main_fd);
     errno = saved_errno;
     return -1;
   }
@@ -110,12 +113,12 @@ int processx__pty_master_open(char *sub_name, size_t sn_len) {
   if (strlen(p) < sn_len) {
     strncpy(sub_name, p, sn_len);
   } else {
-    close(master_fd);
+    close(main_fd);
     errno = EOVERFLOW;
     return -1;
   }
 
-  return master_fd;
+  return main_fd;
 }
 
 /* These run in the child process, so no coverage here. */
@@ -445,7 +448,7 @@ SEXP processx_exec(SEXP command, SEXP args, SEXP pty, SEXP pty_options,
   int signal_pipe[2] = { -1, -1 };
   int (*pipes)[2];
   int i;
-  int pty_master_fd;
+  int pty_main_fd;
 #define R_PROCESSX_PTY_NAME_LEN 2014
   char pty_namex[R_PROCESSX_PTY_NAME_LEN];
   char *pty_name = cpty ? pty_namex : 0;
@@ -470,9 +473,9 @@ SEXP processx_exec(SEXP command, SEXP args, SEXP pty, SEXP pty_options,
   handle = R_ExternalPtrAddr(result);
 
   if (cpty) {
-    pty_master_fd =
-      processx__pty_master_open(pty_name, R_PROCESSX_PTY_NAME_LEN);
-    if (pty_master_fd == -1) {
+    pty_main_fd =
+      processx__pty_main_open(pty_name, R_PROCESSX_PTY_NAME_LEN);
+    if (pty_main_fd == -1) {
       R_THROW_SYSTEM_ERROR("Cannot open pty when running '%s'", ccommand);
     }
     options.pty_echo = LOGICAL(VECTOR_ELT(pty_options, 0))[0];
@@ -525,7 +528,7 @@ SEXP processx_exec(SEXP command, SEXP args, SEXP pty, SEXP pty_options,
     err = -errno;
     if (signal_pipe[0] >= 0) close(signal_pipe[0]);
     if (signal_pipe[1] >= 0) close(signal_pipe[1]);
-    if (cpty) close(pty_master_fd);
+    if (cpty) close(pty_main_fd);
     processx__unblock_sigchld();
     R_THROW_SYSTEM_ERROR_CODE(err, "Cannot fork when running '%s'",
                               ccommand);
@@ -534,7 +537,7 @@ SEXP processx_exec(SEXP command, SEXP args, SEXP pty, SEXP pty_options,
   /* CHILD */
   if (pid == 0) {
     /* LCOV_EXCL_START */
-    if (cpty) close(pty_master_fd);
+    if (cpty) close(pty_main_fd);
     processx__unblock_sigchld();
     processx__child_init(handle, connections, pipes, num_connections,
 			 ccommand, cargs, signal_pipe[1],
@@ -549,7 +552,7 @@ SEXP processx_exec(SEXP command, SEXP args, SEXP pty, SEXP pty_options,
   handle->create_time = processx__create_time(pid);
 
   handle->ptyfd = -1;
-  if (cpty) handle->ptyfd = pty_master_fd;
+  if (cpty) handle->ptyfd = pty_main_fd;
 
   /* We need to know the processx children */
   if (processx__child_add(pid, result)) {
