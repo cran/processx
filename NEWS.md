@@ -1,4 +1,8 @@
 
+# processx 3.6.0
+
+* processx now gives better error messages, and better stack traces.
+
 # processx 3.5.3
 
 * `run()` now sets `stderr` to `NULL` in the result (instead of an empty
