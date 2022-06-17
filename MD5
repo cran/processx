@@ -1,7 +1,7 @@
-fc20e83a6e877580f9dbe088a119f5c3 *DESCRIPTION
+595a081087137b3f1d3fa6b36a8e6663 *DESCRIPTION
 71a00913acfad3bf9c2d93ea5abaa910 *LICENSE
 56dc6a306306557c6e54f094453019e8 *NAMESPACE
-eebbad7f73e83f36c3848c186b8aac2e *NEWS.md
+297b40af41b2fcb965433348ac3b5d16 *NEWS.md
 c1dbb190ed90e0231c513371c733c9c7 *R/aaa-rstudio-detect.R
 a5c41da68d1c16d385fd6278a53629ba *R/aaassertthat.R
 40b27e0d8a8cac92072e33f08bfaf015 *R/assertions.R
@@ -9,7 +9,7 @@ a5c41da68d1c16d385fd6278a53629ba *R/aaassertthat.R
 a15ee3dddecc6fe3faaf206de2e61591 *R/cleancall.R
 9f9fd40c9b92f99af062d7214b14bbe1 *R/client-lib.R
 846a64960205ce401a47fb5926d116d1 *R/connections.R
-35ca0f3f97a79a46585670ed1f86aaca *R/errors.R
+2bd82078d905bc2fbca6683632dc87c2 *R/errors.R
 5133cf0bf0482470a59cec13db981a70 *R/initialize.R
 b304475d20a6074e3612654e5f66f97d *R/io.R
 784beb150cffb5f0181a9ab56fde69d8 *R/named_pipe.R
@@ -39,7 +39,7 @@ a79a45599b5cb28509916799efaeed74 *src/Makevars
 e33eabedcaff1aa80996612bb5ab3588 *src/base64.c
 2686333f5c6ef98c225e15a77b25eae9 *src/cleancall.c
 bff2a7876350a82b2c7d7e402588cddf *src/cleancall.h
-d72fc2c1c067fd3860e8657d76528472 *src/client.c
+8dad2c196f957ed02cf1d197fc0bad6a *src/client.c
 285094d5398302c3eee29f6ab6dd1f9d *src/create-time.c
 bc57a7d677a95e5b3e78250e4a5e0beb *src/errors.c
 001ad320075ddf2288694894dabc1354 *src/errors.h
@@ -73,7 +73,7 @@ e307e6ef100c2ecbe02ae73ebd7235d4 *src/win/processx-win.h
 31b9c63ad796287cb74ebbdd14e82623 *src/win/stdio.c
 7602581f90033a58793f3ac0bb2f6c5a *src/win/thread.c
 5db427905d85011dd3b9678fc8b92093 *src/win/utils.c
-0ee55b0e1f690aeed2b114104378917b *tests/testthat.R
+52cd95b6c52834a3de7ed7399d0c6e0c *tests/testthat.R
 4df266de106f933b76ef5c946df08bfa *tests/testthat/_snaps/err-output.md
 64988b24fb447a26a7bb13424c39738f *tests/testthat/_snaps/errors.md
 b4e448e8600fa63f41cc30e5e784f75c *tests/testthat/fixtures/simple.txt
@@ -85,7 +85,7 @@ cd3d1a1709e0c05ec4a371fa6b3800cf *tests/testthat/test-assertions.R
 2f993fadb4661d1dfba10bdda6bf9f87 *tests/testthat/test-connections.R
 79bd08a8b25b3714058869629a0c7f9f *tests/testthat/test-env.R
 574849e9261e3ca4ee31a39a03353692 *tests/testthat/test-err-output.R
-c993831ca8399ba7133294c348c683bd *tests/testthat/test-err.R
+a8ce007d61b7963682b0696b14d62db8 *tests/testthat/test-err.R
 326da6be41d3b065297a3c2c917c8612 *tests/testthat/test-errors.R
 15811491d184acb5a65fc011913bd291 *tests/testthat/test-extra-connections.R
 a9d6b207d336f559794c131797c320c3 *tests/testthat/test-io.R
