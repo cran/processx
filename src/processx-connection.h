@@ -39,6 +39,7 @@ typedef struct {
   OVERLAPPED overlapped;
   BOOLEAN async;
   BOOLEAN read_pending;
+  BOOLEAN connecting;
   BOOLEAN freelist;
 } processx_i_connection_t;
 #else
@@ -50,8 +51,16 @@ typedef enum {
   PROCESSX_FILE_TYPE_FILE = 1,	/* regular file, blocking IO */
   PROCESSX_FILE_TYPE_ASYNCFILE,	/* regular file, async IO (well, win only) */
   PROCESSX_FILE_TYPE_PIPE,	/* pipe, blocking IO */
-  PROCESSX_FILE_TYPE_ASYNCPIPE	/* pipe, async IO */
+  PROCESSX_FILE_TYPE_ASYNCPIPE, /* pipe, async IO */
+  PROCESSX_FILE_TYPE_SOCKET
 } processx_file_type_t;
+
+typedef enum {
+  PROCESSX_SOCKET_LISTEN = 1,
+  PROCESSX_SOCKET_LISTEN_PIPE_READY,
+  PROCESSX_SOCKET_CONNECTED_SERVER,
+  PROCESSX_SOCKET_CONNECTED_CLIENT
+} processx_socket_state_t;
 
 typedef struct processx_connection_s {
   processx_file_type_t type;
@@ -75,6 +84,8 @@ typedef struct processx_connection_s {
   size_t utf8_data_size;
 
   int poll_idx;
+  char *filename;
+  int state;
 } processx_connection_t;
 
 struct processx_pollable_s;
@@ -134,6 +145,15 @@ SEXP processx_connection_create_fd(SEXP handle, SEXP encoding, SEXP close);
 
 /* Create file connection */
 SEXP processx_connection_create_file(SEXP filename, SEXP read, SEXP write);
+SEXP processx_connection_create_fifo(SEXP read, SEXP write,
+                                     SEXP filename, SEXP encoding,
+                                     SEXP nonblocking);
+SEXP processx_connection_connect_fifo(SEXP filename, SEXP read, SEXP write,
+                                      SEXP encoding, SEXP nonblocking);
+SEXP processx_connection_create_socket(SEXP filename, SEXP encoding);
+SEXP processx_connection_connect_socket(SEXP filename, SEXP encoding);
+SEXP processx_connection_accept_socket(SEXP con);
+SEXP processx_connection_socket_state(SEXP con);
 
 /* Read characters in a given encoding from the connection. */
 SEXP processx_connection_read_chars(SEXP con, SEXP nchars);
@@ -146,6 +166,9 @@ SEXP processx_connection_write_bytes(SEXP con, SEXP chars);
 
 /* Check if the connection has ended. */
 SEXP processx_connection_is_eof(SEXP con);
+
+/* Query file name, if any */
+SEXP processx_connection_file_name(SEXP con);
 
 /* Close the connection. */
 SEXP processx_connection_close(SEXP con);
@@ -176,6 +199,7 @@ processx_connection_t *processx_c_connection_create(
   processx_file_handle_t os_handle,
   processx_file_type_t type,
   const char *encoding,
+  const char *filename,
   SEXP *r_connection);
 
 /* Destroy connection object. We need this for the C API */
@@ -252,11 +276,13 @@ extern int processx__thread_cmd;
 #define PROCESSX__THREAD_CMD_IDLE 1
 #define PROCESSX__THREAD_CMD_READFILE 2
 #define PROCESSX__THREAD_CMD_GETSTATUS 3
+#define PROCESSX__THREAD_CMD_CONNECTPIPE 4
 
 BOOL processx__thread_readfile(processx_connection_t *ccon,
 			       LPVOID lpBuffer,
 			       DWORD nNumberOfBytesToRead,
 			       LPDWORD lpNumberOfBytesRead);
+BOOL processx__thread_connectpipe(processx_connection_t *ccon);
 BOOL processx__thread_getstatus(LPDWORD lpNumberOfBytes,
 				PULONG_PTR lpCompletionKey,
 				LPOVERLAPPED *lpOverlapped,

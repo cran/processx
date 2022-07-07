@@ -50,7 +50,8 @@ DWORD processx_i_thread_readfile() {
 
   if (! ccon->handle.overlapped.hEvent &&
       (ccon->type == PROCESSX_FILE_TYPE_ASYNCFILE ||
-       ccon->type == PROCESSX_FILE_TYPE_ASYNCPIPE)) {
+       ccon->type == PROCESSX_FILE_TYPE_ASYNCPIPE ||
+       ccon->type == PROCESSX_FILE_TYPE_SOCKET)) {
     ccon->handle.overlapped.hEvent = CreateEvent(
       /* lpEventAttributes = */ NULL,
       /* bManualReset = */      FALSE,
@@ -82,6 +83,45 @@ DWORD processx_i_thread_readfile() {
 		       processx__thread_readfile_data.nNumberOfBytesToRead,
 		       processx__thread_readfile_data.lpNumberOfBytesRead,
 		       &ccon->handle.overlapped);
+  return res;
+}
+
+DWORD processx_i_thread_connectpipe() {
+
+  processx_connection_t *ccon = processx__thread_readfile_data.ccon;
+
+  if (! ccon->handle.overlapped.hEvent &&
+      (ccon->type == PROCESSX_FILE_TYPE_ASYNCFILE ||
+       ccon->type == PROCESSX_FILE_TYPE_ASYNCPIPE ||
+       ccon->type == PROCESSX_FILE_TYPE_SOCKET)) {
+    ccon->handle.overlapped.hEvent = CreateEvent(
+      /* lpEventAttributes = */ NULL,
+      /* bManualReset = */      FALSE,
+      /* bInitialState = */     FALSE,
+      /* lpName = */            NULL);
+
+    if (ccon->handle.overlapped.hEvent == NULL) return FALSE;
+
+    HANDLE iocp = processx__get_default_iocp();
+    if (!iocp) return FALSE;
+
+    HANDLE res = CreateIoCompletionPort(
+      /* FileHandle =  */                ccon->handle.handle,
+      /* ExistingCompletionPort = */     iocp,
+      /* CompletionKey = */              (ULONG_PTR) ccon,
+      /* NumberOfConcurrentThreads = */  0);
+
+    if (!res) return FALSE;
+  }
+
+  /* These need to be set to zero for non-file handles */
+  if (ccon->type != PROCESSX_FILE_TYPE_ASYNCFILE) {
+    ccon->handle.overlapped.Offset = 0;
+    ccon->handle.overlapped.OffsetHigh = 0;
+  }
+
+  DWORD res = ConnectNamedPipe(ccon->handle.handle,
+			       &ccon->handle.overlapped);
   return res;
 }
 
@@ -123,6 +163,10 @@ DWORD processx__thread_callback(void *data) {
 
     case PROCESSX__THREAD_CMD_GETSTATUS:
       processx__thread_success = processx_i_thread_getstatus();
+      break;
+
+    case PROCESSX__THREAD_CMD_CONNECTPIPE:
+      processx__thread_success = processx_i_thread_connectpipe();
       break;
 
     default:
@@ -202,6 +246,18 @@ BOOL processx__thread_readfile(processx_connection_t *ccon,
   return processx__thread_success;
 }
 
+BOOL processx__thread_connectpipe(processx_connection_t *ccon) {
+  processx__start_thread();
+  processx__thread_cmd = PROCESSX__THREAD_CMD_CONNECTPIPE;
+
+  processx__thread_readfile_data.ccon = ccon;
+
+  SetEvent(processx__thread_start);
+  WaitForSingleObject(processx__thread_done, INFINITE);
+
+  return processx__thread_success;
+}
+
 /* GetQueuedCompletionStatus but in the bg thread */
 
 BOOL  processx__thread_getstatus(LPDWORD lpNumberOfBytes,
@@ -230,7 +286,6 @@ BOOL processx__thread_getstatus_select(LPDWORD lpNumberOfBytes,
   TIMEVAL timeout;
   char buf[10];
   HANDLE iocp = processx__get_default_iocp();
-  int ret;
 
   processx__start_thread();
 
@@ -246,8 +301,8 @@ BOOL processx__thread_getstatus_select(LPDWORD lpNumberOfBytes,
   processx__thread_getstatus_data.dwMilliseconds = dwMilliseconds;
 
   SetEvent(processx__thread_start);
-  ret = select(/* (ignored) */ 0, &processx__readfds, &processx__writefds,
-	 &processx__exceptionfds, &timeout);
+  select(/* (ignored) */ 0, &processx__readfds, &processx__writefds,
+    &processx__exceptionfds, &timeout);
   if (FD_ISSET(processx__notify_socket[0], &processx__readfds)) {
     /* TODO: error */
     recv(processx__notify_socket[0], buf, 10, 0);
