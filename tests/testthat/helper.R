@@ -60,13 +60,10 @@ skip_in_covr <- function() {
   if (Sys.getenv("R_COVR", "") == "true") skip("in covr")
 }
 
-httpbin <- local({
-  cache <- NULL
-  function(url = "") {
-    if (is.null(cache)) cache <<- curl::nslookup("eu.httpbin.org")
-    paste0("http://", cache, url)
-  }
-})
+httpbin <- webfakes::new_app_process(
+  webfakes::httpbin_app(),
+  opts = webfakes::server_opts(num_threads = 6)
+)
 
 interrupt_me <- function(expr, after = 1) {
   tryCatch({
@@ -146,8 +143,10 @@ scrub_px <- function(x) {
 
 scrub_srcref <- function(x) {
   x <- sub(" at cnd-abort.R:[0-9]+:[0-9]+", "", x)
-  x <- sub(" at errors.R:[0-9]+:[0-9]+", "", x)
+  x <- sub(" at standalone-errors.R:[0-9]+:[0-9]+", "", x)
   x <- sub(" at run.R:[0-9]+:[0-9]+", "", x)
   x <- sub("\033[90m\033[39m", "", x, fixed = TRUE)
   x
 }
+
+err$register_testthat_print()

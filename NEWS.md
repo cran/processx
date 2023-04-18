@@ -1,3 +1,10 @@
+# processx 3.8.1
+
+* On Unixes, R processes created by callr now feature a `SIGTERM`
+  cleanup handler that cleans up the temporary directory before
+  shutting down. To enable it, set the `PROCESSX_R_SIGTERM_CLEANUP`
+  envvar to a non-empty value.
+
 # processx 3.8.0
 
 * processx error stacks are better now. They have ANSI hyperlinks for

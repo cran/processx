@@ -234,6 +234,34 @@ SEXP processx_set_stderr_to_file(SEXP file) {
 SEXP processx_base64_encode(SEXP array);
 SEXP processx_base64_decode(SEXP array);
 
+
+#ifndef _WIN32
+
+#include <string.h>
+#include <signal.h>
+
+void term_handler(int n) {
+  // Need the cast and the +1 to ignore compiler warning about unused
+  // return value.
+  (void) (system("rm -rf \"$R_SESSION_TMPDIR\"") + 1);
+  // Continue signal
+  raise(SIGTERM);
+}
+
+void install_term_handler(void) {
+  if (! getenv("PROCESSX_R_SIGTERM_CLEANUP")) {
+    return;
+  }
+
+  struct sigaction sig = {{ 0 }};
+  sig.sa_handler = term_handler;
+  sig.sa_flags = SA_RESETHAND;
+  sigaction(SIGTERM, &sig, NULL);
+}
+
+#endif // not _WIN32
+
+
 static const R_CallMethodDef callMethods[]  = {
   { "processx_base64_encode", (DL_FUNC) &processx_base64_encode, 1 },
   { "processx_base64_decode", (DL_FUNC) &processx_base64_decode, 1 },
@@ -250,4 +278,8 @@ void R_init_client(DllInfo *dll) {
   R_registerRoutines(dll, NULL, callMethods, NULL, NULL);
   R_useDynamicSymbols(dll, FALSE);
   R_forceSymbols(dll, TRUE);
+
+#ifndef _WIN32
+  install_term_handler();
+#endif
 }
