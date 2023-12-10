@@ -1,7 +1,7 @@
-9b0278ac23a968c91a47f09c2fc57403 *DESCRIPTION
-71a00913acfad3bf9c2d93ea5abaa910 *LICENSE
+e0ca17fe486b8d2c4e127531b1800e7f *DESCRIPTION
+478a5709d406443e0150df95536986e3 *LICENSE
 91fc98153bb51806e34bb61488cd4e96 *NAMESPACE
-50d42cb115fa1aaca604494a57ae6e1e *NEWS.md
+c55a1311a7e7e6723dac37b93377058d *NEWS.md
 5005d70702792f8dfd84a352cf7bf3cb *R/aaa-import-standalone-rstudio-detect.R
 a5c41da68d1c16d385fd6278a53629ba *R/aaassertthat.R
 40b27e0d8a8cac92072e33f08bfaf015 *R/assertions.R
@@ -22,7 +22,7 @@ df6cc46bc7fae1a55b713f3d5065b35a *R/processx-package.R
 d8fa67e340671bf7390340e1a70394c6 *R/standalone-errors.R
 feb91ad63da939628d3ab6fa81a0e3e8 *R/supervisor.R
 6d5e9f4711c7ea713fce7a8747664037 *R/utils.R
-455f5fd2d5b48bb7167e12901cc1354d *README.md
+29f7b8f70313cc2042e31c853499735e *README.md
 de7d080267fecbb5892e173f90955c29 *inst/CODE_OF_CONDUCT.md
 47af9c285fd7b21f8c93e6b3e3b5cda5 *inst/include/processx/unix-sockets.c
 59e7410756334b9fe8aa1b07dc92405a *inst/include/processx/unix-sockets.h
@@ -40,7 +40,7 @@ c3978703d8f40f2679795335715e98f4 *man/figures/lifecycle-experimental.svg
 a0fca60f1fd130d6df65a226ba8cebdf *man/poll.Rd
 bacee6647a112a41311ce2984ab5f274 *man/process.Rd
 d3751e2f395d2e918df2c0b9d6699d74 *man/process_initialize.Rd
-74909a242ce85fd1044a4fc75680d32d *man/processx-package.Rd
+0c498104021dfb1abedaccf4b1a2c81b *man/processx-package.Rd
 53b060f60f40af491122e2fa98acf53e *man/processx_connections.Rd
 c12cf3443525fbba5bcf6d1fb19da5bf *man/processx_fifos.Rd
 58c57ac402039c963c3e3c3184be3e40 *man/processx_sockets.Rd
@@ -52,8 +52,8 @@ e33eabedcaff1aa80996612bb5ab3588 *src/base64.c
 2db4898abcab6bce2d202f0fdc371fee *src/cleancall.c
 3cedbcdfb4d38768d2765d57a891eee1 *src/cleancall.h
 d8896719aa674ad6b9e7655c07851ac1 *src/client.c
-e06c68aed81fffedf0e870fcdd4a6706 *src/create-time.c
-bc57a7d677a95e5b3e78250e4a5e0beb *src/errors.c
+8c8424410a9a77b2a2af7fdb9660374b *src/create-time.c
+9f1ee6d9b40e7a78246c6b6ffcfdfbc2 *src/errors.c
 001ad320075ddf2288694894dabc1354 *src/errors.h
 280f3d370d15955c9c54229efe51c76a *src/init.c
 811416e55db86e1b85c4999734f9a81c *src/install.libs.R
