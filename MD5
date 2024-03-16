@@ -1,7 +1,7 @@
-e0ca17fe486b8d2c4e127531b1800e7f *DESCRIPTION
-478a5709d406443e0150df95536986e3 *LICENSE
+01f2a77b3cf09c013439c5b848e26309 *DESCRIPTION
+cb922095b787f479d36f04ffa5ee8411 *LICENSE
 91fc98153bb51806e34bb61488cd4e96 *NAMESPACE
-c55a1311a7e7e6723dac37b93377058d *NEWS.md
+6bcdc4e873d60688baac05b6e0893a35 *NEWS.md
 5005d70702792f8dfd84a352cf7bf3cb *R/aaa-import-standalone-rstudio-detect.R
 a5c41da68d1c16d385fd6278a53629ba *R/aaassertthat.R
 40b27e0d8a8cac92072e33f08bfaf015 *R/assertions.R
@@ -22,8 +22,9 @@ df6cc46bc7fae1a55b713f3d5065b35a *R/processx-package.R
 d8fa67e340671bf7390340e1a70394c6 *R/standalone-errors.R
 feb91ad63da939628d3ab6fa81a0e3e8 *R/supervisor.R
 6d5e9f4711c7ea713fce7a8747664037 *R/utils.R
-29f7b8f70313cc2042e31c853499735e *README.md
+cd3abe09a6c2b73771337fe2a98b878a *README.md
 de7d080267fecbb5892e173f90955c29 *inst/CODE_OF_CONDUCT.md
+679e485a8ee93f683f3926fb899e1f13 *inst/COPYRIGHTS
 47af9c285fd7b21f8c93e6b3e3b5cda5 *inst/include/processx/unix-sockets.c
 59e7410756334b9fe8aa1b07dc92405a *inst/include/processx/unix-sockets.h
 7f2564eb61705261b68ae639c214adfa *man/base64_decode.Rd
@@ -40,7 +41,7 @@ c3978703d8f40f2679795335715e98f4 *man/figures/lifecycle-experimental.svg
 a0fca60f1fd130d6df65a226ba8cebdf *man/poll.Rd
 bacee6647a112a41311ce2984ab5f274 *man/process.Rd
 d3751e2f395d2e918df2c0b9d6699d74 *man/process_initialize.Rd
-0c498104021dfb1abedaccf4b1a2c81b *man/processx-package.Rd
+aa517e8cbaa7d1cc38a175cc49ba7a88 *man/processx-package.Rd
 53b060f60f40af491122e2fa98acf53e *man/processx_connections.Rd
 c12cf3443525fbba5bcf6d1fb19da5bf *man/processx_fifos.Rd
 58c57ac402039c963c3e3c3184be3e40 *man/processx_sockets.Rd
@@ -55,7 +56,7 @@ d8896719aa674ad6b9e7655c07851ac1 *src/client.c
 8c8424410a9a77b2a2af7fdb9660374b *src/create-time.c
 9f1ee6d9b40e7a78246c6b6ffcfdfbc2 *src/errors.c
 001ad320075ddf2288694894dabc1354 *src/errors.h
-280f3d370d15955c9c54229efe51c76a *src/init.c
+c56a74afa3bf2e69455f0cf3dba909e2 *src/init.c
 811416e55db86e1b85c4999734f9a81c *src/install.libs.R
 1613836e9671885b35c78ac3febd453a *src/poll.c
 068976f4d940a79df0f3bc912ae7328f *src/processx-connection.c
