@@ -1,7 +1,7 @@
-01f2a77b3cf09c013439c5b848e26309 *DESCRIPTION
+5e141f976ad7b86b57a6a703186ebbef *DESCRIPTION
 cb922095b787f479d36f04ffa5ee8411 *LICENSE
 91fc98153bb51806e34bb61488cd4e96 *NAMESPACE
-6bcdc4e873d60688baac05b6e0893a35 *NEWS.md
+a4dcf8b74a723ae298d8dd0ce5b23dc0 *NEWS.md
 5005d70702792f8dfd84a352cf7bf3cb *R/aaa-import-standalone-rstudio-detect.R
 a5c41da68d1c16d385fd6278a53629ba *R/aaassertthat.R
 40b27e0d8a8cac92072e33f08bfaf015 *R/assertions.R
@@ -21,7 +21,7 @@ df6cc46bc7fae1a55b713f3d5065b35a *R/processx-package.R
 2ddc3a22638e7c81e7b5480392acf46b *R/run.R
 d8fa67e340671bf7390340e1a70394c6 *R/standalone-errors.R
 feb91ad63da939628d3ab6fa81a0e3e8 *R/supervisor.R
-6d5e9f4711c7ea713fce7a8747664037 *R/utils.R
+7ab60de4d9311dd568a4c5b2d6506e12 *R/utils.R
 cd3abe09a6c2b73771337fe2a98b878a *README.md
 de7d080267fecbb5892e173f90955c29 *inst/CODE_OF_CONDUCT.md
 679e485a8ee93f683f3926fb899e1f13 *inst/COPYRIGHTS
@@ -47,7 +47,7 @@ c12cf3443525fbba5bcf6d1fb19da5bf *man/processx_fifos.Rd
 58c57ac402039c963c3e3c3184be3e40 *man/processx_sockets.Rd
 90b08bb97d865b0134ebeb9a12b5abf4 *man/run.Rd
 360106905db4eab328231746d6f769de *man/supervisor_kill.Rd
-cf34783ab3efd227a2bd9a5584620dd1 *src/Makevars
+f43124154f022f4f2077dac64fda18af *src/Makevars
 c7e27b4ff4f0c551a6e3e297340419dd *src/Makevars.win
 e33eabedcaff1aa80996612bb5ab3588 *src/base64.c
 2db4898abcab6bce2d202f0fdc371fee *src/cleancall.c
@@ -87,8 +87,10 @@ e307e6ef100c2ecbe02ae73ebd7235d4 *src/win/processx-win.h
 d64f30036ecf2f6e2a9119a2244506b8 *src/win/thread.c
 bd68d1f799bcf7e6256fd957bb81a40f *src/win/utils.c
 52cd95b6c52834a3de7ed7399d0c6e0c *tests/testthat.R
-4df266de106f933b76ef5c946df08bfa *tests/testthat/_snaps/err-output.md
+6b1fa5f6c65ac526a5744bd07e9005ad *tests/testthat/_snaps/err-output.md
 64988b24fb447a26a7bb13424c39738f *tests/testthat/_snaps/errors.md
+9ca150e7504853f445eba1695491b76b *tests/testthat/_snaps/newcli/err-output.md
+09decf658edc071942efbce0867935fb *tests/testthat/_snaps/oldcli/err-output.md
 a581792175916255ea6e79148ebc311c *tests/testthat/_snaps/standalone-errors.md
 b4e448e8600fa63f41cc30e5e784f75c *tests/testthat/fixtures/simple.txt
 4d4d298515f41f640fbcd32bda9aaa17 *tests/testthat/helper.R
@@ -98,14 +100,14 @@ cd3d1a1709e0c05ec4a371fa6b3800cf *tests/testthat/test-assertions.R
 741805a93be050012d56c23e0363afc1 *tests/testthat/test-client-lib.R
 2f993fadb4661d1dfba10bdda6bf9f87 *tests/testthat/test-connections.R
 79bd08a8b25b3714058869629a0c7f9f *tests/testthat/test-env.R
-574849e9261e3ca4ee31a39a03353692 *tests/testthat/test-err-output.R
+884296f353e6fcd3eb459ccc01b66539 *tests/testthat/test-err-output.R
 326da6be41d3b065297a3c2c917c8612 *tests/testthat/test-errors.R
 15811491d184acb5a65fc011913bd291 *tests/testthat/test-extra-connections.R
 1f3c825378c10526e8e0b91ecb126d49 *tests/testthat/test-fifo.R
 a9d6b207d336f559794c131797c320c3 *tests/testthat/test-io.R
-f0a571935637c783735e48ef50362e13 *tests/testthat/test-kill-tree.R
+29459d7ab4297366b6829fdbe5153e13 *tests/testthat/test-kill-tree.R
 e1a2be7227ddde9ab4ad91fbc47d93c9 *tests/testthat/test-poll-connections.R
-a58531571a56c093e851074b2df2717c *tests/testthat/test-poll-curl.R
+1432f9c1e37bd08342df427a2c27c4ea *tests/testthat/test-poll-curl.R
 058f5cc103be50de1fd51cbe75d003af *tests/testthat/test-poll-stress.R
 19a65778fbbfec06ef2a6c31fc68e020 *tests/testthat/test-poll.R
 233d111de8948307155e0412dbb04270 *tests/testthat/test-poll2.R
@@ -120,7 +122,7 @@ e554630ab26f045bcf406ebee775086f *tests/testthat/test-set-std.R
 c8c48dbcce565f905042bb746414e98f *tests/testthat/test-standalone-errors.R
 ada8301f7b94feae5981748489ba7742 *tests/testthat/test-stdin.R
 9b88d0b0b9970e48d9263f918d63afbf *tests/testthat/test-stress.R
-079de0aecc4a3e0d143a13755d9e460a *tests/testthat/test-unix-sockets.R
+5400744fea028509ab2f8a3aca674a36 *tests/testthat/test-unix-sockets.R
 c8776f77326adddc60b6345b12b47842 *tests/testthat/test-utf8.R
 a71cc952812bbb8f6e64680c6bbc17b6 *tests/testthat/test-utils.R
 0485bb3b76f45075f0c5bc448bcd0132 *tests/testthat/test-wait.R
