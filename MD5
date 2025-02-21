@@ -1,7 +1,7 @@
-5e141f976ad7b86b57a6a703186ebbef *DESCRIPTION
+ec4c1448069cee83e76a8c39bb6858c8 *DESCRIPTION
 cb922095b787f479d36f04ffa5ee8411 *LICENSE
 91fc98153bb51806e34bb61488cd4e96 *NAMESPACE
-a4dcf8b74a723ae298d8dd0ce5b23dc0 *NEWS.md
+d6c6365a4d214eaa60bd97e2f478ba18 *NEWS.md
 5005d70702792f8dfd84a352cf7bf3cb *R/aaa-import-standalone-rstudio-detect.R
 a5c41da68d1c16d385fd6278a53629ba *R/aaassertthat.R
 40b27e0d8a8cac92072e33f08bfaf015 *R/assertions.R
@@ -16,7 +16,7 @@ d32f2c1f3c6dd21c173977c991530dff *R/on-load.R
 09a04531b287c092eab43163f566eeb8 *R/poll.R
 24b0458c7861d82ec086704f6bd46afa *R/print.R
 46e9f9a6117210d76165131aab576050 *R/process-helpers.R
-1159b20fd0d2299676ddd412591e33bd *R/process.R
+2a4f995a23ca3383a8dcf095c10cd69b *R/process.R
 df6cc46bc7fae1a55b713f3d5065b35a *R/processx-package.R
 2ddc3a22638e7c81e7b5480392acf46b *R/run.R
 d8fa67e340671bf7390340e1a70394c6 *R/standalone-errors.R
@@ -83,7 +83,7 @@ b1a7171a38dfca59f7aca92adf00e922 *src/supervisor/windows.c
 7041fc35a53483756606432115ccc348 *src/win/processx-stdio.h
 e307e6ef100c2ecbe02ae73ebd7235d4 *src/win/processx-win.h
 59c958cf3cb4346dee1e8728b954c114 *src/win/processx.c
-6baaa192c95197297d5b76667fb98221 *src/win/stdio.c
+128ae8423b9b37ac04cb5396c4cf32ac *src/win/stdio.c
 d64f30036ecf2f6e2a9119a2244506b8 *src/win/thread.c
 bd68d1f799bcf7e6256fd957bb81a40f *src/win/utils.c
 52cd95b6c52834a3de7ed7399d0c6e0c *tests/testthat.R
