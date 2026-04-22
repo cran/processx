@@ -199,8 +199,37 @@ transform_px <- function(x) {
   sub("'.*/px([.]exe)?'", "'<path>/px'", x)
 }
 
+transform_column_number <- function(x) {
+  sub("([.]R:[0-9]+:)[0-9]+", "\\1<col>", x)
+}
+
+transform_line_number <- function(x) {
+  sub("([.]R:[0-9]+:)[0-9]+", ".R:<line>:<col>", x)
+}
+
 sysname <- function() {
   Sys.info()[["sysname"]]
+}
+
+is_asan <- function() {
+  .Call(c_is_asan_)
+}
+
+is_ubsan <- function() {
+  .Call(c_is_ubsan_)
+}
+
+is_valgrind <- function() {
+  .Call(c_is_valgrind_)
+}
+
+is_san <- function() {
+  is_asan() || is_ubsan()
+}
+
+get_deadline <- function(secs = 1, asan_secs = secs * 100) {
+  dl <- if (is_san()) asan_secs else secs
+  Sys.time() + as.difftime(dl, units = "secs")
 }
 
 err$register_testthat_print()

@@ -3,32 +3,32 @@
     Code
       conn_read_chars(sock1)
     Condition
-      Error:
+      Error in `processx_conn_read_chars()`:
       ! ! Native call to `processx_connection_read_chars` failed
-      Caused by error in `chain_call(c_processx_connection_read_chars, con, n)` at connections.R:302:3:
-      ! Cannot read from processx connection (system error 57, Socket is not connected) @processx-connection.c:1828 (processx__connection_read)
+      Caused by error in `chain_call(c_processx_connection_read_chars, con, n)` at connections.R:318:<col>:
+      ! Cannot read from processx connection (system error 57, Socket is not connected) @processx-connection.c:1940 (processx__connection_read)
 
 # errors
 
     Code
       conn_create_unix_socket(sock)
     Condition
-      Error:
+      Error in `conn_create_unix_socket()`:
       ! ! Native call to `processx_connection_create_socket` failed
-      Caused by error in `chain_call(c_processx_connection_create_socket, filename, encoding)` at connections.R:590:3:
+      Caused by error in `chain_call(c_processx_connection_create_socket, filename, encoding)` at connections.R:634:<col>:
       ! Server socket path too long: <tempdir>/<tempfile>
     Code
       conn_create_unix_socket("/dev/null")
     Condition
-      Error:
+      Error in `conn_create_unix_socket()`:
       ! ! Native call to `processx_connection_create_socket` failed
-      Caused by error in `chain_call(c_processx_connection_create_socket, filename, encoding)` at connections.R:590:3:
-      ! Cannot bind to socket (system error 48, Address already in use) @processx-connection.c:442 (processx_connection_create_socket)
+      Caused by error in `chain_call(c_processx_connection_create_socket, filename, encoding)` at connections.R:634:<col>:
+      ! Cannot bind to socket (system error 48, Address already in use) @processx-connection.c:479 (processx_connection_create_socket)
     Code
       conn_connect_unix_socket("/dev/null")
     Condition
-      Error:
+      Error in `conn_connect_unix_socket()`:
       ! ! Native call to `processx_connection_connect_socket` failed
-      Caused by error in `chain_call(c_processx_connection_connect_socket, filename, encoding)` at connections.R:612:3:
-      ! Cannot connect to socket (system error 38, Socket operation on non-socket) @processx-connection.c:513 (processx_connection_connect_socket)
+      Caused by error in `chain_call(c_processx_connection_connect_socket, filename, encoding)` at connections.R:656:<col>:
+      ! Cannot connect to socket (system error 38, Socket operation on non-socket) @processx-connection.c:550 (processx_connection_connect_socket)
 
