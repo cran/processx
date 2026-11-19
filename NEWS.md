@@ -1,3 +1,29 @@
+# processx 3.10.0
+
+* `$kill_tree()` now throws the intended "not supported on this
+  platform" error on platforms that the ps package does not support,
+  instead of an internal error about a missing argument.
+
+* The supervisor process no longer leaks a process handle every time it
+  checks whether a process is still running on Windows (#421).
+
+* The `$signal()` and `$interrupt()` methods now send the signal to the
+  child's whole process group by default on Unix. This matches the
+  behavior of `$kill()`. A new `group` argument (default `TRUE`) can be
+  set to `FALSE` to send the signal to the child process only. The
+  argument is ignored on Windows.
+
+* The `grace` argument of the `kill()` method is now active on Unix
+  platforms. If `grace` is positive, processx first tries to kill with
+  `SIGTERM` with a timeout of `grace` seconds. After the timeout,
+  `SIGKILL` is sent as before. The default of `grace` is now `0`, so
+  by default `kill()` still sends `SIGKILL` right away.
+
+* New `cleanup_grace` argument to `process$new()` and `run()`. When the
+  process is cleaned up (on GC or on exit), processx first tries
+  `SIGTERM` with a timeout of `cleanup_grace` seconds before falling
+  back to `SIGKILL`. On Unix only.
+
 # processx 3.9.0
 
 * New experimental `pipeline` R6 class for running two or more processes

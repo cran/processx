@@ -6,15 +6,6 @@
 #include <R.h>
 #include <stdio.h>
 
-/* RUNNING_ON_VALGRIND is a runtime check provided by <valgrind/valgrind.h>.
-   Use __has_include so the build does not fail when the header is absent. */
-#if defined(__has_include) && __has_include(<valgrind/valgrind.h>)
-# include <valgrind/valgrind.h>
-# define PROCESSX_RUNNING_ON_VALGRIND() (RUNNING_ON_VALGRIND)
-#else
-# define PROCESSX_RUNNING_ON_VALGRIND() 0
-#endif
-
 void R_init_processx_win(void);
 void R_init_processx_unix(void);
 SEXP processx__unload_cleanup(void);
@@ -22,7 +13,6 @@ SEXP run_testthat_tests(void);
 SEXP processx__echo_on(void);
 SEXP processx__echo_off(void);
 SEXP processx__set_boot_time(SEXP);
-SEXP is_valgrind_(void);
 
 #ifdef GCOV_COMPILE
 
@@ -43,13 +33,14 @@ SEXP gcov_flush(void) {
 
 SEXP is_asan_()
 {
-#if defined(__has_feature)
-#if __has_feature(address_sanitizer) // for clang
-#define __SANITIZE_ADDRESS__         // GCC already sets this
-#endif
+
+#ifndef __has_feature
+  #define __has_feature(x) 0
 #endif
 
-#ifdef __SANITIZE_ADDRESS__
+#if defined(__SANITIZE_ADDRESS__)
+  return Rf_ScalarLogical(1);
+#elif __has_feature(address_sanitizer) // for clang
   return Rf_ScalarLogical(1);
 #else
   return Rf_ScalarLogical(0);
@@ -71,39 +62,15 @@ SEXP is_ubsan_()
 #endif
 }
 
-SEXP is_valgrind_(void)
-{
-#ifdef __linux__
-  /* On Linux, /proc/self/maps lists all mapped files.  When running under
-     valgrind the map will contain paths like "vgpreload_memcheck*.so", so
-     scanning for "valgrind" reliably detects it even when the valgrind
-     development headers are not installed (common on CI). */
-  FILE *fp = fopen("/proc/self/maps", "r");
-  if (fp != NULL) {
-    char line[1024];
-    int found = 0;
-    while (fgets(line, sizeof(line), fp) != NULL) {
-      if (strstr(line, "/valgrind/") != NULL) {
-        found = 1;
-        break;
-      }
-    }
-    fclose(fp);
-    if (found) return Rf_ScalarLogical(1);
-  }
-#endif
-  return Rf_ScalarLogical(PROCESSX_RUNNING_ON_VALGRIND() != 0);
-}
-
 static const R_CallMethodDef callMethods[]  = {
   CLEANCALL_METHOD_RECORD,
-  { "processx_exec",               (DL_FUNC) &processx_exec,              15 },
+  { "processx_exec",               (DL_FUNC) &processx_exec,              16 },
   { "processx_wait",               (DL_FUNC) &processx_wait,               3 },
   { "processx_is_alive",           (DL_FUNC) &processx_is_alive,           2 },
   { "processx_pty_close",          (DL_FUNC) &processx_pty_close,          2 },
   { "processx_get_exit_status",    (DL_FUNC) &processx_get_exit_status,    2 },
-  { "processx_signal",             (DL_FUNC) &processx_signal,             3 },
-  { "processx_interrupt",          (DL_FUNC) &processx_interrupt,          2 },
+  { "processx_signal",             (DL_FUNC) &processx_signal,             4 },
+  { "processx_interrupt",          (DL_FUNC) &processx_interrupt,          3 },
   { "processx_kill",               (DL_FUNC) &processx_kill,               3 },
   { "processx_get_pid",            (DL_FUNC) &processx_get_pid,            1 },
   { "processx_create_time",        (DL_FUNC) &processx_create_time,        1 },
@@ -164,7 +131,6 @@ static const R_CallMethodDef callMethods[]  = {
   { "gcov_flush", (DL_FUNC) gcov_flush, 0 },
   { "is_asan_", (DL_FUNC) is_asan_, 0 },
   { "is_ubsan_", (DL_FUNC) is_ubsan_, 0 },
-  { "is_valgrind_", (DL_FUNC) is_valgrind_, 0 },
 
   { NULL, NULL, 0 }
 };

@@ -45,14 +45,14 @@ extern "C" {
 SEXP processx_exec(SEXP command, SEXP args, SEXP pty, SEXP pty_options,
 		   SEXP connections, SEXP env, SEXP windows_verbatim_args,
 		   SEXP windows_hide_window, SEXP windows_detached_process,
-		   SEXP private_, SEXP cleanup, SEXP wd, SEXP encoding,
-		   SEXP tree_id, SEXP linux_pdeathsig);
+		   SEXP private_, SEXP cleanup, SEXP cleanup_grace,
+		   SEXP wd, SEXP encoding, SEXP tree_id, SEXP linux_pdeathsig);
 SEXP processx_wait(SEXP status, SEXP timeout, SEXP name);
 SEXP processx_is_alive(SEXP status, SEXP name);
 SEXP processx_pty_close(SEXP status, SEXP name);
 SEXP processx_get_exit_status(SEXP status, SEXP name);
-SEXP processx_signal(SEXP status, SEXP signal, SEXP name);
-SEXP processx_interrupt(SEXP status, SEXP name);
+SEXP processx_signal(SEXP status, SEXP signal, SEXP name, SEXP group);
+SEXP processx_interrupt(SEXP status, SEXP name, SEXP group);
 SEXP processx_kill(SEXP status, SEXP grace, SEXP name);
 SEXP processx_get_pid(SEXP status);
 SEXP processx_create_time(SEXP r_pid);

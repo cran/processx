@@ -14,7 +14,11 @@ dummy_r6 <- function() R6::R6Class
 #' streams. The process id is then used to manage the process.
 #'
 #' @param n Number of characters or lines to read.
-#' @param grace Currently not used.
+#' @param grace Grace period in seconds. For `$kill()` on Unix, if it is
+#'   positive, processx first sends `SIGTERM`, and sends `SIGKILL` if the
+#'   process is still alive after `grace` seconds. If it is zero (the
+#'   default), processx sends `SIGKILL` right away. Ignored on Windows and
+#'   by `$kill_tree()`.
 #' @param close_connections Whether to close standard input, standard
 #'   output, standard error connections and the poll connection, after
 #'   killing the process.
@@ -229,6 +233,10 @@ process <- R6::R6Class(
     #'   object is garbage collected.
     #' @param cleanup_tree Whether to kill the process and its child
     #'   process tree when the `process` object is garbage collected.
+    #' @param cleanup_grace Grace period between `SIGTERM` and `SIGKILL`.
+    #'   Only has an effect on Unix platforms. Set to 0 to terminate abruptly
+    #'   with `SIGKILL` only. Currently defaults to 0 until we implement
+    #'   a better approach on session quit.
     #' @param wd Working directory of the process. It must exist.
     #'   If `NULL`, then the current working directory is used.
     #' @param echo_cmd Whether to print the command to the screen before
@@ -275,6 +283,7 @@ process <- R6::R6Class(
       env = NULL,
       cleanup = TRUE,
       cleanup_tree = FALSE,
+      cleanup_grace = 0.0,
       wd = NULL,
       echo_cmd = FALSE,
       supervise = FALSE,
@@ -300,6 +309,7 @@ process <- R6::R6Class(
         env,
         cleanup,
         cleanup_tree,
+        cleanup_grace,
         wd,
         echo_cmd,
         supervise,
@@ -319,7 +329,7 @@ process <- R6::R6Class(
     #' was terminated, and `FALSE` if it was not (because it was
     #' already finished/dead when `processx` tried to terminate it).
 
-    kill = function(grace = 0.1, close_connections = TRUE) {
+    kill = function(grace = 0, close_connections = TRUE) {
       process_kill(self, private, grace, close_connections)
     },
 
@@ -336,7 +346,7 @@ process <- R6::R6Class(
     #' were killed, the names are the names of the processes (e.g. `"sleep"`,
     #' `"notepad.exe"`, `"Rterm.exe"`, etc.).
 
-    kill_tree = function(grace = 0.1, close_connections = TRUE) {
+    kill_tree = function(grace = 0, close_connections = TRUE) {
       process_kill_tree(self, private, grace, close_connections)
     },
 
@@ -349,16 +359,28 @@ process <- R6::R6Class(
     #' and the 0 signal as well.
     #' @param signal An integer scalar, the id of the signal to send to
     #'   the process. See [tools::pskill()] for the list of signals.
+    #' @param group Whether to send the signal to the whole process group of
+    #'   the child. The child is started in its own process group (via
+    #'   `setsid()` on Unix), so by default the signal is delivered to the
+    #'   child and any descendants that have not started a new group of
+    #'   their own. Set to `FALSE` to send the signal to the child process
+    #'   only. Ignored on Windows.
 
-    signal = function(signal) process_signal(self, private, signal),
+    signal = function(signal, group = TRUE) {
+      process_signal(self, private, signal, group)
+    },
 
     #' @description
     #' Send an interrupt to the process. On Unix this is a
     #' `SIGINT` signal, and it is usually equivalent to pressing CTRL+C at
     #' the terminal prompt. On Windows, it is a CTRL+BREAK keypress.
     #' Applications may catch these events. By default they will quit.
+    #' @param group Whether to send the interrupt to the whole process group
+    #'   of the child. See `$signal()` for details. Ignored on Windows,
+    #'   where the CTRL+BREAK event is always delivered to all processes
+    #'   attached to the child's console.
 
-    interrupt = function() process_interrupt(self, private),
+    interrupt = function(group = TRUE) process_interrupt(self, private, group),
 
     #' @description
     #' Query the process id.
@@ -758,6 +780,7 @@ process <- R6::R6Class(
     args = NULL, # Save 'args' argument here
     cleanup = NULL, # cleanup argument
     cleanup_tree = NULL, # cleanup_tree argument
+    cleanup_grace = NULL, # cleanup_grace argument
     stdin = NULL, # stdin argument or stream
     stdout = NULL, # stdout argument or stream
     stderr = NULL, # stderr argument or stream
@@ -839,30 +862,36 @@ process_get_exit_status <- function(self, private) {
   )
 }
 
-process_signal <- function(self, private, signal) {
+process_signal <- function(self, private, signal, group) {
   "!DEBUG process_signal `private$get_short_name()` `signal`"
   chain_call(
     c_processx_signal,
     private$status,
     as.integer(signal),
-    private$get_short_name()
+    private$get_short_name(),
+    as.logical(group)
   )
 }
 
-process_interrupt <- function(self, private) {
+process_interrupt <- function(self, private, group) {
   "!DEBUG process_interrupt `private$get_short_name()`"
   if (os_type() == "windows") {
     pid <- as.character(self$get_pid())
     st <- run(get_tool("interrupt"), c(pid, "c"), error_on_status = FALSE)
     if (st$status == 0) TRUE else FALSE
   } else {
-    chain_call(c_processx_interrupt, private$status, private$get_short_name())
+    chain_call(
+      c_processx_interrupt,
+      private$status,
+      private$get_short_name(),
+      as.logical(group)
+    )
   }
 }
 
 process_kill <- function(self, private, grace, close_connections) {
   "!DEBUG process_kill '`private$get_short_name()`', pid `self$get_pid()`"
-  ret <- chain_call(
+  ret <- chain_clean_call(
     c_processx_kill,
     private$status,
     as.numeric(grace),
